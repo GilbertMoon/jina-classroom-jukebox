@@ -10,7 +10,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.app.api.auth import router as auth_router
 from backend.app.api.health import router as health_router
 from backend.app.api.player import router as player_router
-from backend.app.auth_dependencies import require_admin
+from backend.app.api.song_requests import router as song_requests_router
+from backend.app.auth_dependencies import require_admin, require_student
 from backend.app.models import User
 
 
@@ -33,6 +34,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(player_router)
+app.include_router(song_requests_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 templates = Jinja2Templates(directory=APP_DIR / "templates")
@@ -65,3 +67,14 @@ async def admin_dashboard(
 @app.get("/login", response_class=HTMLResponse, tags=["authentication"])
 async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "login.html")
+
+
+@app.get("/student", response_class=HTMLResponse, tags=["student"])
+async def student_dashboard(
+    request: Request, user: User = Depends(require_student)
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "student/dashboard.html",
+        {"user": user, "csrf_token": request.session["csrf_token"]},
+    )

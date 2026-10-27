@@ -66,3 +66,21 @@ def require_admin_csrf(user: UserWithCsrf) -> User:
 
 
 AdminUserWithCsrf = Annotated[User, Depends(require_admin_csrf)]
+
+
+def require_student(user: CurrentUser) -> User:
+    if user.role != UserRole.STUDENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="학생 권한이 필요합니다.")
+    return user
+
+
+StudentUser = Annotated[User, Depends(require_student)]
+
+
+def require_student_csrf(user: UserWithCsrf) -> User:
+    if user.role != UserRole.STUDENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="학생 권한이 필요합니다.")
+    return user
+
+
+StudentUserWithCsrf = Annotated[User, Depends(require_student_csrf)]

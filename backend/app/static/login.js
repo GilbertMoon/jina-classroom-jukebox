@@ -20,7 +20,7 @@ form.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(payload.detail || "로그인에 실패했습니다.");
     }
-    window.location.assign(payload.user.role === "ADMIN" ? "/admin" : "/docs");
+    window.location.assign(payload.user.role === "ADMIN" ? "/admin" : "/student");
   } catch (error) {
     alertBox.textContent = error.message;
     alertBox.classList.remove("d-none");

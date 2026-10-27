@@ -86,6 +86,11 @@ class Track(Base):
 
 class SongRequest(Base):
     __tablename__ = "requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "track_id", name="uq_requests_user_id_track_id"
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)

@@ -2,7 +2,7 @@
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
-현재 단계는 **STEP 04: 로그인과 역할별 권한**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
+현재 단계는 **STEP 05: 학생 신청곡 접수와 내역 조회**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
 
 ## 지금 구현된 기능
 
@@ -20,6 +20,9 @@
 - 서명된 쿠키 세션을 사용하는 로그인·로그아웃
 - 학생(`student`)과 관리자(`admin`) 역할 구분
 - 관리자 제어 요청의 CSRF 방어와 감사 로그
+- 학생용 신청곡 화면: `GET /student`
+- YouTube 주소 검증·정규화와 중복 신청 차단
+- 본인의 신청곡과 처리 상태만 조회
 - pytest 자동 테스트
 - GitHub Actions 자동 테스트
 
@@ -33,6 +36,8 @@ jina-classroom-jukebox/
 │   ├── app/api/auth.py         # 로그인·로그아웃 API
 │   ├── app/security.py         # 비밀번호 해시와 CSRF 토큰
 │   ├── app/api/player.py       # 플레이어 제어 API
+│   ├── app/api/song_requests.py # 신청곡 등록·조회 API
+│   ├── app/youtube.py          # YouTube 주소 검증·정규화
 │   ├── app/services/player.py  # 메모리에서 동작하는 FakePlayer
 │   ├── app/templates/          # 관리자 HTML 화면
 │   ├── app/static/             # 화면 CSS와 JavaScript
@@ -82,7 +87,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`15 passed`가 표시되면 서버, 로그인, 역할별 권한과 모의 플레이어 API가 정상이라는 뜻입니다.
+`22 passed`가 표시되면 서버, 로그인, 역할별 권한, 신청곡과 모의 플레이어 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
@@ -97,6 +102,7 @@ python -m uvicorn backend.app.main:app --reload
 - DB 준비 상태: <http://127.0.0.1:8000/health/ready>
 - API 문서: <http://127.0.0.1:8000/docs>
 - 로그인: <http://127.0.0.1:8000/login>
+- 학생 신청곡: <http://127.0.0.1:8000/student>
 - 관리자 모의 플레이어: <http://127.0.0.1:8000/admin>
 
 서버를 종료하려면 터미널에서 `Ctrl+C`를 누릅니다.
@@ -167,6 +173,17 @@ python -m scripts.seed_demo
 
 세션 쿠키는 출입증, 역할은 출입증에 적힌 권한이라고 생각하면 쉽습니다. CSRF 토큰은 다른 사이트가 사용자를 속여 버튼을 누르게 하는 요청을 막는 추가 확인표입니다.
 
+## STEP 05가 동작하는 순서
+
+1. 학생이 로그인하면 `/student` 신청곡 화면으로 이동합니다.
+2. YouTube 주소, 곡 제목, 가수·채널과 선택 메모를 입력합니다.
+3. 서버가 공식 YouTube 주소인지 확인하고 11자리 영상 ID를 추출합니다.
+4. 같은 영상은 하나의 `tracks` 곡 정보로 관리하고, 학생의 신청은 `requests`에 따로 저장합니다.
+5. 같은 학생이 같은 영상을 다시 신청하면 중복임을 알려줍니다.
+6. 학생은 `/api/requests/me`를 통해 본인의 신청 내역만 볼 수 있습니다.
+
+`Track`은 도서관의 책 정보, `SongRequest`는 “누가 그 책을 신청했는지” 적은 신청서라고 생각하면 쉽습니다. YouTube 주소는 검색·식별·검토에만 사용하며 이 단계에서는 음원을 내려받지 않습니다.
+
 `GET /health/live`는 웹 프로세스가 살아 있는지만 확인합니다. `GET /health/ready`는 PostgreSQL 연결까지 성공해야 `200`을 반환합니다. DB가 연결되지 않으면 안전하게 `503`을 반환합니다.
 
 GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마이그레이션과 예시 데이터 생성을 실제 PostgreSQL에서도 자동 검증합니다.
@@ -180,4 +197,4 @@ GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마�
 
 ## 다음 단계
 
-STEP 05에서는 학생 신청곡 접수와 목록 조회를 구현합니다.
+STEP 06에서는 관리자의 신청곡 승인·반려 기능을 구현합니다.

@@ -12,7 +12,7 @@ from backend.app.api import health
 from backend.app.api.player import player
 from backend.app.database import get_db
 from backend.app.main import app
-from backend.app.models import Base, ControlAuditLog, User
+from backend.app.models import Base, ControlAuditLog, SongRequest, Track, User
 from backend.app.models.entities import UserRole
 from backend.app.security import hash_password
 
@@ -41,6 +41,12 @@ def isolated_database() -> Generator[None, None, None]:
                     email="student@example.com",
                     role=UserRole.STUDENT,
                     password_hash=hash_password("student-password"),
+                ),
+                User(
+                    name="Another Student",
+                    email="another@example.com",
+                    role=UserRole.STUDENT,
+                    password_hash=hash_password("another-password"),
                 ),
             ]
         )
@@ -162,6 +168,116 @@ def test_student_can_read_status_but_cannot_control_player() -> None:
     current_status, control = run(scenario())
     assert current_status.status_code == 200
     assert control.status_code == 403
+
+
+def test_student_can_open_dashboard_create_and_list_own_request() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            csrf_token = await login(client, "student@example.com", "student-password")
+            dashboard = await client.get("/student")
+            created = await client.post(
+                "/api/requests",
+                headers={"X-CSRF-Token": csrf_token},
+                json={
+                    "youtube_url": "https://youtu.be/dQw4w9WgXcQ?t=4",
+                    "title": "Test Song",
+                    "artist_or_channel": "Test Channel",
+                    "comment": "아침에 듣고 싶어요",
+                },
+            )
+            own_requests = await client.get("/api/requests/me")
+            return dashboard, created, own_requests
+
+    dashboard, created, own_requests = run(scenario())
+    assert dashboard.status_code == 200
+    assert created.status_code == 201
+    assert created.json()["youtube_url"] == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    assert created.json()["status"] == "PENDING"
+    assert [item["title"] for item in own_requests.json()] == ["Test Song"]
+
+    with app.state.testing_session() as session:
+        assert len(session.scalars(select(Track)).all()) == 1
+        assert len(session.scalars(select(SongRequest)).all()) == 1
+
+
+@pytest.mark.parametrize(
+    "youtube_url",
+    [
+        "not-a-url",
+        "https://example.com/watch?v=dQw4w9WgXcQ",
+        "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ",
+        "https://www.youtube.com/watch?v=too-short",
+    ],
+)
+def test_invalid_youtube_url_is_rejected(youtube_url: str) -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            csrf_token = await login(client, "student@example.com", "student-password")
+            return await client.post(
+                "/api/requests",
+                headers={"X-CSRF-Token": csrf_token},
+                json={"youtube_url": youtube_url, "title": "Test Song"},
+            )
+
+    assert run(scenario()).status_code == 422
+
+
+def test_duplicate_request_is_rejected_and_other_student_has_private_list() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            csrf_token = await login(student, "student@example.com", "student-password")
+            payload = {
+                "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "title": "Test Song",
+            }
+            first = await student.post(
+                "/api/requests", json=payload, headers={"X-CSRF-Token": csrf_token}
+            )
+            duplicate = await student.post(
+                "/api/requests", json=payload, headers={"X-CSRF-Token": csrf_token}
+            )
+
+        async with AsyncClient(transport=transport, base_url="http://test") as other:
+            await login(other, "another@example.com", "another-password")
+            other_list = await other.get("/api/requests/me")
+        return first, duplicate, other_list
+
+    first, duplicate, other_list = run(scenario())
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert other_list.json() == []
+
+
+def test_song_request_requires_student_role_and_csrf() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            await login(student, "student@example.com", "student-password")
+            no_csrf = await student.post(
+                "/api/requests",
+                json={
+                    "youtube_url": "https://youtu.be/dQw4w9WgXcQ",
+                    "title": "Test Song",
+                },
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            admin_request = await admin.post(
+                "/api/requests",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={
+                    "youtube_url": "https://youtu.be/dQw4w9WgXcQ",
+                    "title": "Test Song",
+                },
+            )
+        return no_csrf, admin_request
+
+    no_csrf, admin_request = run(scenario())
+    assert no_csrf.status_code == 403
+    assert admin_request.status_code == 403
 
 
 def test_admin_control_requires_csrf_and_creates_audit_log() -> None:
