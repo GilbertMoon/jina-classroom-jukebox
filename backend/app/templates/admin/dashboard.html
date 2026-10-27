@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Jina Classroom Jukebox 모의 관리자 대시보드">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>관리자 대시보드 · Jina Classroom Jukebox</title>
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
@@ -21,9 +22,12 @@
           <h1 class="display-6 fw-bold mb-1">Jina Jukebox</h1>
           <p class="text-secondary mb-0">실제 장비 연결 전 사용하는 모의 관리자 플레이어</p>
         </div>
-        <div class="connection-pill" aria-label="연결 상태">
-          <span class="status-dot" aria-hidden="true"></span>
-          Demo Player Online
+        <div class="d-flex align-items-center gap-2">
+          <div class="connection-pill" aria-label="연결 상태">
+            <span class="status-dot" aria-hidden="true"></span>
+            Demo Player Online
+          </div>
+          <button id="logout-button" class="btn btn-outline-light" type="button">로그아웃</button>
         </div>
       </header>
 

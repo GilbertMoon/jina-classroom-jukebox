@@ -50,7 +50,7 @@ def test_demo_seed_is_repeatable() -> None:
         seed_demo_data(session)
         seed_demo_data(session)
 
-        assert session.scalar(select(func.count()).select_from(User)) == 1
+        assert session.scalar(select(func.count()).select_from(User)) == 2
         assert session.scalar(select(func.count()).select_from(Track)) == 1
 
 

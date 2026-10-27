@@ -4,6 +4,8 @@ const stateLabels = {
   paused: ["일시정지", "text-bg-warning"],
 };
 
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
 const elements = {
   alert: document.querySelector("#alert"),
   stateBadge: document.querySelector("#state-badge"),
@@ -17,6 +19,7 @@ const elements = {
   volume: document.querySelector("#volume"),
   volumeValue: document.querySelector("#volume-value"),
   muteButton: document.querySelector("#mute-button"),
+  logoutButton: document.querySelector("#logout-button"),
 };
 
 function formatTime(seconds) {
@@ -56,8 +59,12 @@ function showError(error) {
 async function request(url, options = {}) {
   elements.alert.classList.add("d-none");
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": csrfToken } : {}),
+      ...options.headers,
+    },
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -106,6 +113,15 @@ elements.muteButton.addEventListener("click", async () => {
       body: JSON.stringify({ muted }),
     });
     render(state);
+  } catch (error) {
+    showError(error);
+  }
+});
+
+elements.logoutButton.addEventListener("click", async () => {
+  try {
+    await request("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
   } catch (error) {
     showError(error);
   }

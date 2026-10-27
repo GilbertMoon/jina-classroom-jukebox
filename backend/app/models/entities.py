@@ -52,6 +52,7 @@ class User(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(100))
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(512))
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, native_enum=False, length=20), default=UserRole.STUDENT
     )

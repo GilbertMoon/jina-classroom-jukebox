@@ -15,6 +15,20 @@ body {
   color: #f6f7fb;
 }
 
+.login-shell {
+  align-items: center;
+  display: flex;
+  min-height: 100vh;
+}
+
+.login-card {
+  backdrop-filter: blur(20px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  max-width: 32rem;
+  width: 100%;
+}
+
 .eyebrow,
 .card-label {
   color: var(--cyan);

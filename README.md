@@ -2,7 +2,7 @@
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
-현재 단계는 **STEP 03: PostgreSQL 데이터베이스 기반**입니다. 아직 실제 음악 재생이나 로그인 기능은 포함하지 않습니다.
+현재 단계는 **STEP 04: 로그인과 역할별 권한**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
 
 ## 지금 구현된 기능
 
@@ -17,6 +17,9 @@
 - Alembic 데이터베이스 마이그레이션
 - PostgreSQL 연결 준비 상태 확인
 - 반복 실행 가능한 개발용 예시 데이터
+- 서명된 쿠키 세션을 사용하는 로그인·로그아웃
+- 학생(`student`)과 관리자(`admin`) 역할 구분
+- 관리자 제어 요청의 CSRF 방어와 감사 로그
 - pytest 자동 테스트
 - GitHub Actions 자동 테스트
 
@@ -27,6 +30,8 @@ jina-classroom-jukebox/
 ├── .github/workflows/test.yml  # GitHub에서 자동으로 테스트하는 설정
 ├── backend/
 │   ├── app/main.py             # FastAPI 서버가 시작되는 파일
+│   ├── app/api/auth.py         # 로그인·로그아웃 API
+│   ├── app/security.py         # 비밀번호 해시와 CSRF 토큰
 │   ├── app/api/player.py       # 플레이어 제어 API
 │   ├── app/services/player.py  # 메모리에서 동작하는 FakePlayer
 │   ├── app/templates/          # 관리자 HTML 화면
@@ -77,7 +82,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`7 passed`가 표시되면 서버, 관리자 화면과 모의 플레이어 API가 정상이라는 뜻입니다.
+`15 passed`가 표시되면 서버, 로그인, 역할별 권한과 모의 플레이어 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
@@ -91,13 +96,24 @@ python -m uvicorn backend.app.main:app --reload
 - 상태 확인: <http://127.0.0.1:8000/health/live>
 - DB 준비 상태: <http://127.0.0.1:8000/health/ready>
 - API 문서: <http://127.0.0.1:8000/docs>
+- 로그인: <http://127.0.0.1:8000/login>
 - 관리자 모의 플레이어: <http://127.0.0.1:8000/admin>
 
 서버를 종료하려면 터미널에서 `Ctrl+C`를 누릅니다.
 
 ## 환경변수
 
-개발용 환경변수 파일이 필요해지면 `.env.example`을 복사하여 `.env`를 만듭니다. `.env`는 비밀정보가 들어갈 수 있으므로 Git에 저장하지 않습니다.
+`.env.example`을 복사하여 `.env`를 만듭니다. `.env`는 비밀정보가 들어갈 수 있으므로 Git에 저장하지 않습니다.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+다음 값은 반드시 본인만 아는 값으로 바꿉니다.
+
+- `SESSION_SECRET`: 로그인 쿠키의 위조 여부를 확인하는 긴 무작위 문자열
+- `DEMO_ADMIN_PASSWORD`: 개발용 관리자 비밀번호
+- `DEMO_STUDENT_PASSWORD`: 개발용 학생 비밀번호
 
 ## PostgreSQL 데이터베이스 준비
 
@@ -127,11 +143,29 @@ python -m alembic upgrade head
 python -m alembic current
 ```
 
-개발용 관리자와 테스트 곡 메타데이터를 한 번 넣으려면 다음 명령을 사용합니다. 여러 번 실행해도 같은 데이터가 중복 생성되지 않습니다.
+개발용 계정과 테스트 곡 메타데이터를 한 번 넣으려면 다음 명령을 사용합니다. 여러 번 실행해도 같은 데이터가 중복 생성되지 않습니다.
 
 ```bash
 python -m scripts.seed_demo
 ```
+
+개발용 로그인 이메일은 아래와 같습니다. 비밀번호는 `.env`에 직접 지정한 값을 사용합니다.
+
+- 관리자: `admin@jukebox.local`
+- 학생: `student@jukebox.local`
+
+비밀번호 원문은 데이터베이스에 저장하지 않습니다. Argon2로 만든 해시만 저장하므로, 데이터베이스를 보더라도 원래 비밀번호가 그대로 노출되지 않습니다.
+
+## STEP 04가 동작하는 순서
+
+1. 사용자가 이메일과 비밀번호를 입력합니다.
+2. 서버가 저장된 Argon2 해시와 비밀번호를 비교합니다.
+3. 성공하면 서버가 서명된 세션 쿠키를 브라우저에 보냅니다.
+4. 이후 요청마다 서버가 세션의 사용자와 역할을 다시 확인합니다.
+5. 학생은 플레이어 상태를 볼 수 있지만 재생·볼륨 제어는 할 수 없습니다.
+6. 관리자의 변경 요청에는 CSRF 토큰이 필요하며, 누가 무엇을 변경했는지 감사 로그로 남깁니다.
+
+세션 쿠키는 출입증, 역할은 출입증에 적힌 권한이라고 생각하면 쉽습니다. CSRF 토큰은 다른 사이트가 사용자를 속여 버튼을 누르게 하는 요청을 막는 추가 확인표입니다.
 
 `GET /health/live`는 웹 프로세스가 살아 있는지만 확인합니다. `GET /health/ready`는 PostgreSQL 연결까지 성공해야 `200`을 반환합니다. DB가 연결되지 않으면 안전하게 `503`을 반환합니다.
 
@@ -146,4 +180,4 @@ GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마�
 
 ## 다음 단계
 
-STEP 04에서는 로그인과 학생·관리자 권한을 구현합니다.
+STEP 05에서는 학생 신청곡 접수와 목록 조회를 구현합니다.

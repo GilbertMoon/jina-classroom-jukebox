@@ -1,8 +1,11 @@
+import os
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models import Track, User
 from backend.app.models.entities import MediaStatus, UserRole
+from backend.app.security import hash_password
 
 
 def seed_demo_data(session: Session) -> None:
@@ -14,6 +17,24 @@ def seed_demo_data(session: Session) -> None:
                 name="Demo Admin",
                 email="admin@jukebox.local",
                 role=UserRole.ADMIN,
+                password_hash=hash_password(
+                    os.getenv("DEMO_ADMIN_PASSWORD", "change-me-before-use")
+                ),
+            )
+        )
+
+    student = session.scalar(
+        select(User).where(User.email == "student@jukebox.local")
+    )
+    if student is None:
+        session.add(
+            User(
+                name="Demo Student",
+                email="student@jukebox.local",
+                role=UserRole.STUDENT,
+                password_hash=hash_password(
+                    os.getenv("DEMO_STUDENT_PASSWORD", "change-me-before-use")
+                ),
             )
         )
 

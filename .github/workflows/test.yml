@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql+psycopg://jukebox:jukebox@localhost:5432/jukebox_test
+      SESSION_SECRET: ci-only-session-secret-not-used-in-production
+      DEMO_ADMIN_PASSWORD: ci-admin-password
+      DEMO_STUDENT_PASSWORD: ci-student-password
     services:
       postgres:
         image: postgres:18.6
