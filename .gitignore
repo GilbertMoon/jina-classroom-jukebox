@@ -26,3 +26,4 @@ media/
 *.wav
 *.dump
 *.sql
+*.db

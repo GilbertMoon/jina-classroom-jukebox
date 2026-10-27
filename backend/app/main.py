@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from backend.app.api.health import router as health_router
 from backend.app.api.player import router as player_router
 
 
@@ -16,6 +17,7 @@ app = FastAPI(
     description="AX2 classroom jukebox API",
     version="0.1.0",
 )
+app.include_router(health_router)
 app.include_router(player_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 

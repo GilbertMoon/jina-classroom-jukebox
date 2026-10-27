@@ -2,7 +2,10 @@ import asyncio
 
 from httpx import ASGITransport, AsyncClient
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 
+from backend.app.api import health
 from backend.app.api.player import player
 from backend.app.main import app
 
@@ -37,6 +40,31 @@ def test_health_live() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_health_ready_when_database_is_available(monkeypatch) -> None:
+    monkeypatch.setattr(health, "engine", create_engine("sqlite+pysqlite:///:memory:"))
+
+    response = asyncio.run(get("/health/ready"))
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "available"}
+
+
+def test_health_ready_when_database_is_unavailable(monkeypatch) -> None:
+    class UnavailableEngine:
+        def connect(self):
+            raise OperationalError("SELECT 1", {}, Exception("offline"))
+
+    monkeypatch.setattr(health, "engine", UnavailableEngine())
+
+    response = asyncio.run(get("/health/ready"))
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "database": "unavailable",
+    }
 
 
 def test_admin_dashboard() -> None:
