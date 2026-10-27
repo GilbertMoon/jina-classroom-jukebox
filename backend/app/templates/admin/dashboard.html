@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko" data-bs-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Jina Classroom Jukebox 모의 관리자 대시보드">
+    <title>관리자 대시보드 · Jina Classroom Jukebox</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous"
+    >
+    <link href="{{ url_for('static', path='/styles.css') }}" rel="stylesheet">
+  </head>
+  <body>
+    <main class="container py-4 py-lg-5">
+      <header class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+          <p class="eyebrow mb-2">AX2 CLASSROOM</p>
+          <h1 class="display-6 fw-bold mb-1">Jina Jukebox</h1>
+          <p class="text-secondary mb-0">실제 장비 연결 전 사용하는 모의 관리자 플레이어</p>
+        </div>
+        <div class="connection-pill" aria-label="연결 상태">
+          <span class="status-dot" aria-hidden="true"></span>
+          Demo Player Online
+        </div>
+      </header>
+
+      <div id="alert" class="alert alert-danger d-none" role="alert"></div>
+
+      <section class="player-shell rounded-4 p-3 p-md-4 p-lg-5 shadow-lg">
+        <div class="row g-4 align-items-center">
+          <div class="col-lg-5">
+            <div class="album-art rounded-4" aria-hidden="true">
+              <span>♫</span>
+            </div>
+          </div>
+
+          <div class="col-lg-7">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <span id="state-badge" class="badge text-bg-secondary">정지</span>
+              <span class="small text-secondary">지금 재생 중</span>
+            </div>
+            <h2 id="track-title" class="display-5 fw-bold text-truncate">불러오는 중…</h2>
+            <p id="track-artist" class="fs-5 text-secondary">잠시만 기다려 주세요.</p>
+
+            <div class="progress mb-2" role="progressbar" aria-label="곡 재생 진행률">
+              <div id="track-progress" class="progress-bar" style="width: 0%"></div>
+            </div>
+            <div class="d-flex justify-content-between small text-secondary mb-4">
+              <span id="elapsed-time">0:00</span>
+              <span id="duration-time">0:00</span>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mb-4" aria-label="재생 제어">
+              <button class="btn btn-primary control-btn" data-action="play" type="button">▶ 재생</button>
+              <button class="btn btn-outline-light control-btn" data-action="pause" type="button">Ⅱ 일시정지</button>
+              <button class="btn btn-outline-light control-btn" data-action="stop" type="button">■ 정지</button>
+              <button class="btn btn-outline-light control-btn" data-action="next" type="button">다음 곡 ›</button>
+            </div>
+
+            <div class="volume-panel rounded-3 p-3">
+              <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+                <label for="volume" class="fw-semibold">출력 볼륨</label>
+                <output id="volume-value" for="volume">30%</output>
+              </div>
+              <div class="d-flex align-items-center gap-3">
+                <button id="mute-button" class="btn btn-sm btn-outline-info" type="button" aria-pressed="false">음소거</button>
+                <input id="volume" class="form-range" type="range" min="0" max="100" value="30">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="row g-3 mt-1" aria-label="플레이어 상세 상태">
+        <div class="col-md-6">
+          <article class="info-card rounded-4 p-4 h-100">
+            <p class="card-label">다음 곡</p>
+            <h3 id="next-title" class="h5 mb-1">불러오는 중…</h3>
+            <p id="next-artist" class="text-secondary mb-0">—</p>
+          </article>
+        </div>
+        <div class="col-md-6">
+          <article class="info-card rounded-4 p-4 h-100">
+            <p class="card-label">운영 안내</p>
+            <h3 class="h5 mb-1">Demo Mode</h3>
+            <p class="text-secondary mb-0">지금은 실제 스피커가 아닌 메모리 속 플레이어를 조작합니다.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', path='/dashboard.js') }}" defer></script>
+  </body>
+</html>

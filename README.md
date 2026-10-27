@@ -2,7 +2,7 @@
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
-현재 단계는 **STEP 01: 프로젝트 기반 구축**입니다. 아직 실제 음악 재생이나 로그인 기능은 포함하지 않습니다.
+현재 단계는 **STEP 02: 관리자용 모의 플레이어**입니다. 아직 실제 음악 재생이나 로그인 기능은 포함하지 않습니다.
 
 ## 지금 구현된 기능
 
@@ -10,6 +10,9 @@
 - 서버 안내 응답: `GET /`
 - 서버 생존 상태 확인: `GET /health/live`
 - Swagger API 문서: `GET /docs`
+- 관리자 모의 플레이어 화면: `GET /admin`
+- 플레이어 상태와 재생 제어 API
+- 볼륨·음소거 제어
 - pytest 자동 테스트
 - GitHub Actions 자동 테스트
 
@@ -20,7 +23,11 @@ jina-classroom-jukebox/
 ├── .github/workflows/test.yml  # GitHub에서 자동으로 테스트하는 설정
 ├── backend/
 │   ├── app/main.py             # FastAPI 서버가 시작되는 파일
-│   └── tests/test_main.py      # 서버 동작을 확인하는 자동 테스트
+│   ├── app/api/player.py       # 플레이어 제어 API
+│   ├── app/services/player.py  # 메모리에서 동작하는 FakePlayer
+│   ├── app/templates/          # 관리자 HTML 화면
+│   ├── app/static/             # 화면 CSS와 JavaScript
+│   └── tests/test_main.py      # 서버와 플레이어를 확인하는 자동 테스트
 ├── .env.example                # 환경변수 작성 예시(비밀값 없음)
 ├── .gitignore                  # GitHub에 올리지 않을 파일 목록
 ├── pytest.ini                  # pytest 설정
@@ -63,7 +70,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`2 passed`가 표시되면 기본 서버와 상태 확인 API가 정상이라는 뜻입니다.
+`7 passed`가 표시되면 서버, 관리자 화면과 모의 플레이어 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
@@ -76,6 +83,7 @@ python -m uvicorn backend.app.main:app --reload
 - 홈: <http://127.0.0.1:8000/>
 - 상태 확인: <http://127.0.0.1:8000/health/live>
 - API 문서: <http://127.0.0.1:8000/docs>
+- 관리자 모의 플레이어: <http://127.0.0.1:8000/admin>
 
 서버를 종료하려면 터미널에서 `Ctrl+C`를 누릅니다.
 
@@ -92,4 +100,4 @@ python -m uvicorn backend.app.main:app --reload
 
 ## 다음 단계
 
-STEP 02에서는 실제 오디오 장비 없이 동작하는 관리자용 모의 플레이어 대시보드를 구현합니다.
+STEP 03에서는 PostgreSQL 데이터베이스와 마이그레이션 기반을 구축합니다.

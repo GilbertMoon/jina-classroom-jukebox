@@ -1,0 +1,126 @@
+:root {
+  --surface: rgba(18, 24, 39, 0.84);
+  --surface-soft: rgba(255, 255, 255, 0.055);
+  --line: rgba(255, 255, 255, 0.1);
+  --cyan: #4ce6e2;
+  --violet: #8b7cff;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(76, 230, 226, 0.16), transparent 34rem),
+    radial-gradient(circle at 90% 20%, rgba(139, 124, 255, 0.2), transparent 32rem),
+    #090d18;
+  color: #f6f7fb;
+}
+
+.eyebrow,
+.card-label {
+  color: var(--cyan);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.connection-pill {
+  align-items: center;
+  background: rgba(76, 230, 226, 0.08);
+  border: 1px solid rgba(76, 230, 226, 0.3);
+  border-radius: 999px;
+  color: #bffef9;
+  display: inline-flex;
+  font-size: 0.875rem;
+  font-weight: 700;
+  gap: 0.55rem;
+  padding: 0.65rem 0.9rem;
+}
+
+.status-dot {
+  background: #57ee9b;
+  border-radius: 50%;
+  box-shadow: 0 0 0.8rem rgba(87, 238, 155, 0.9);
+  height: 0.55rem;
+  width: 0.55rem;
+}
+
+.player-shell,
+.info-card {
+  backdrop-filter: blur(20px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.album-art {
+  align-items: center;
+  aspect-ratio: 1;
+  background:
+    linear-gradient(145deg, rgba(76, 230, 226, 0.9), rgba(139, 124, 255, 0.82)),
+    #171e31;
+  box-shadow: inset 0 0 4rem rgba(5, 9, 20, 0.35), 0 1.5rem 4rem rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.album-art::before,
+.album-art::after {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  content: "";
+  inset: 12%;
+  position: absolute;
+}
+
+.album-art::after {
+  inset: 26%;
+}
+
+.album-art span {
+  color: white;
+  font-size: clamp(4rem, 12vw, 8rem);
+  filter: drop-shadow(0 0.75rem 1.5rem rgba(16, 18, 40, 0.38));
+  z-index: 1;
+}
+
+.progress {
+  background: rgba(255, 255, 255, 0.1);
+  height: 0.4rem;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, var(--cyan), var(--violet));
+}
+
+.control-btn {
+  min-height: 2.75rem;
+  min-width: 6.4rem;
+}
+
+.btn-primary {
+  background: linear-gradient(100deg, #6758e8, #796cf2);
+  border-color: #8b7cff;
+}
+
+.volume-panel {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+}
+
+.form-range {
+  accent-color: var(--cyan);
+}
+
+#mute-button {
+  flex-shrink: 0;
+  min-width: 6.5rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 575.98px) {
+  .control-btn {
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+}
