@@ -1,5 +1,10 @@
 import os
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://jukebox:jukebox@localhost:5432/jukebox"
