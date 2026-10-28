@@ -11,13 +11,10 @@ from backend.app.auth_dependencies import (
 )
 from backend.app.database import get_db
 from backend.app.models import ControlAuditLog
-from backend.app.services.player import FakePlayer
+from backend.app.services.player import player
 
 
 router = APIRouter(prefix="/api/player", tags=["player"])
-player = FakePlayer()
-
-
 class PlayerAction(StrEnum):
     PLAY = "play"
     PAUSE = "pause"

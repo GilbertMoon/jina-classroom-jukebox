@@ -2,7 +2,7 @@
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
-현재 단계는 **STEP 08: 플레이리스트 생성과 순서 편성**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
+현재 단계는 **STEP 09: 시간대별 자동 재생 스케줄**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
 
 ## 지금 구현된 기능
 
@@ -34,6 +34,10 @@
 - 관리자 플레이리스트 생성·순서 저장·활성화
 - 준비되지 않은 곡과 한 목록의 중복 곡 편성 차단
 - 한 번에 하나의 플레이리스트만 활성화하고 변경 감사 로그 저장
+- 요일·시작·종료 시간·볼륨별 자동 재생 스케줄
+- 스케줄 겹침과 교차 자정 시간대 차단
+- 서버 재시작 후 현재 시간대 자동 합류와 종료 시 자동 정지
+- 재생 시작·종료 이력과 스케줄 변경 감사 로그
 - pytest 자동 테스트
 - GitHub Actions 자동 테스트
 
@@ -51,9 +55,11 @@ jina-classroom-jukebox/
 │   ├── app/api/media.py        # 권한 확인 음원 업로드 API
 │   ├── app/api/tracks.py       # 재생 준비가 끝난 곡 조회 API
 │   ├── app/api/playlists.py    # 플레이리스트 생성·편성·활성화 API
+│   ├── app/api/schedules.py    # 자동 재생 스케줄 관리 API
 │   ├── app/youtube.py          # YouTube 주소 검증·정규화
 │   ├── app/services/media.py   # 오디오 파일 구조·재생 시간 검사
 │   ├── app/services/player.py  # 메모리에서 동작하는 FakePlayer
+│   ├── app/services/scheduler.py # 현재 시간 검사와 자동 재생 실행
 │   ├── app/templates/          # 관리자 HTML 화면
 │   ├── app/static/             # 화면 CSS와 JavaScript
 │   └── tests/test_main.py      # 서버와 플레이어를 확인하는 자동 테스트
@@ -102,7 +108,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`33 passed`가 표시되면 서버, 로그인, 역할별 권한, 신청·음원·플레이리스트와 모의 플레이어 API가 정상이라는 뜻입니다.
+`37 passed`가 표시되면 서버, 로그인, 역할별 권한, 신청·음원·플레이리스트·스케줄과 모의 플레이어 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
@@ -137,6 +143,8 @@ Copy-Item .env.example .env
 - `DEMO_STUDENT_PASSWORD`: 개발용 학생 비밀번호
 - `MEDIA_ROOT`: 권한이 확인된 음원 파일을 저장할 비공개 폴더
 - `MAX_MEDIA_SIZE_MB`: 음원 파일 하나의 최대 크기(MB, 기본 50)
+- `SCHEDULER_ENABLED`: 자동 스케줄 실행 여부(`true` 또는 `false`)
+- `SCHEDULER_INTERVAL_SECONDS`: 현재 시간 확인 간격(기본 30초, 최소 5초)
 
 ## PostgreSQL 데이터베이스 준비
 
@@ -240,6 +248,18 @@ python -m scripts.seed_demo
 
 `Playlist`는 재생 목록의 이름표이고, `PlaylistItem.position`은 각 곡 앞에 붙는 순번입니다. 화면에서 순서를 바꾸더라도 최종 검사는 항상 서버가 수행합니다.
 
+## STEP 09가 동작하는 순서
+
+1. 관리자가 활성 플레이리스트, 요일, 시작·종료 시간과 볼륨을 선택합니다.
+2. `POST /api/schedules`가 교차 자정과 기존 스케줄 겹침을 검사합니다.
+3. APScheduler가 기본 30초마다 현재 `Asia/Seoul` 시간을 확인합니다.
+4. 재생 시간대에 들어오면 플레이리스트를 모의 플레이어에 싣고 지정 볼륨으로 재생합니다.
+5. 서버가 시간대 중간에 재시작되어도 다음 검사에서 해당 스케줄에 합류합니다.
+6. 종료 시간이 되거나 플레이리스트·스케줄이 비활성화되면 자동으로 정지합니다.
+7. 시작·종료는 `playback_events`, 설정 변경은 관리자 감사 로그에 저장합니다.
+
+스케줄은 알람시계와 비슷합니다. 데이터베이스에는 “언제 무엇을 틀지”를 저장하고, APScheduler는 주기적으로 시계를 보며 시작과 종료 명령을 실행합니다. 같은 앱을 여러 프로세스로 실행하면 명령이 중복될 수 있으므로 현재 단계에서는 Uvicorn 작업자 1개로 실행합니다.
+
 `GET /health/live`는 웹 프로세스가 살아 있는지만 확인합니다. `GET /health/ready`는 PostgreSQL 연결까지 성공해야 `200`을 반환합니다. DB가 연결되지 않으면 안전하게 `503`을 반환합니다.
 
 GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마이그레이션과 예시 데이터 생성을 실제 PostgreSQL에서도 자동 검증합니다.
@@ -253,4 +273,4 @@ GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마�
 
 ## 다음 단계
 
-STEP 09에서는 활성 플레이리스트를 시간대별로 자동 재생하는 스케줄을 구현합니다.
+STEP 10에서는 Ubuntu MPD 서버와 연결하여 모의 플레이어를 실제 로컬 오디오 재생기로 교체합니다.

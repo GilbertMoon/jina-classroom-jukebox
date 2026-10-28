@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -13,18 +14,31 @@ from backend.app.api.media import router as media_router
 from backend.app.api.player import router as player_router
 from backend.app.api.playlists import router as playlists_router
 from backend.app.api.song_requests import router as song_requests_router
+from backend.app.api.schedules import router as schedules_router
 from backend.app.api.tracks import router as tracks_router
 from backend.app.auth_dependencies import require_admin, require_student
 from backend.app.models import User
+from backend.app.services.scheduler import start_schedule_service, stop_schedule_service
 
 
 APP_DIR = Path(__file__).resolve().parent
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+    if scheduler_enabled:
+        start_schedule_service()
+    yield
+    if scheduler_enabled:
+        stop_schedule_service()
 
 
 app = FastAPI(
     title="Jina Classroom Jukebox",
     description="AX2 classroom jukebox API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 app.add_middleware(
     SessionMiddleware,
@@ -40,6 +54,7 @@ app.include_router(media_router)
 app.include_router(player_router)
 app.include_router(playlists_router)
 app.include_router(song_requests_router)
+app.include_router(schedules_router)
 app.include_router(tracks_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 

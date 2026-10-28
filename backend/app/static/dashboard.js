@@ -32,11 +32,20 @@ const elements = {
   playlistSaveButton: document.querySelector("#playlist-save-button"),
   playlistActivateButton: document.querySelector("#playlist-activate-button"),
   playlistRefreshButton: document.querySelector("#playlist-refresh-button"),
+  scheduleCreateForm: document.querySelector("#schedule-create-form"),
+  scheduleName: document.querySelector("#schedule-name"),
+  schedulePlaylist: document.querySelector("#schedule-playlist"),
+  scheduleStart: document.querySelector("#schedule-start"),
+  scheduleEnd: document.querySelector("#schedule-end"),
+  scheduleVolume: document.querySelector("#schedule-volume"),
+  scheduleList: document.querySelector("#schedule-list"),
+  scheduleRefreshButton: document.querySelector("#schedule-refresh-button"),
 };
 
 let readyTracks = [];
 let playlists = [];
 let editingTrackIds = [];
+let schedules = [];
 
 function formatTime(seconds) {
   const minutes = Math.floor(seconds / 60);
@@ -87,6 +96,7 @@ async function request(url, options = {}) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.detail || `HTTP ${response.status}`);
   }
+  if (response.status === 204) return null;
   return response.json();
 }
 
@@ -260,6 +270,17 @@ function renderPlaylistSelectors(selectedPlaylistId = null) {
   elements.playlistSaveButton.disabled = disabled;
   elements.playlistActivateButton.disabled = disabled;
   elements.playlistAddTrack.disabled = disabled || !readyTracks.length;
+  renderSchedulePlaylistOptions();
+}
+
+function renderSchedulePlaylistOptions() {
+  const activePlaylists = playlists.filter((playlist) => playlist.is_active && playlist.items.length);
+  elements.schedulePlaylist.replaceChildren(...activePlaylists.map((playlist) => {
+    const option = document.createElement("option");
+    option.value = playlist.id;
+    option.textContent = playlist.name;
+    return option;
+  }));
 }
 
 function renderPlaylistQueue() {
@@ -370,6 +391,114 @@ elements.playlistActivateButton.addEventListener("click", async () => {
 
 elements.playlistRefreshButton.addEventListener("click", () => loadPlaylistBuilder(elements.playlistSelect.value));
 
+const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+
+function renderSchedules() {
+  if (!schedules.length) {
+    elements.scheduleList.innerHTML = '<p class="small text-secondary mb-0">등록된 스케줄이 없습니다.</p>';
+    return;
+  }
+  elements.scheduleList.replaceChildren(...schedules.map((schedule) => {
+    const article = document.createElement("article");
+    article.className = "request-item border rounded-3 p-3";
+    const header = document.createElement("div");
+    header.className = "d-flex flex-wrap justify-content-between gap-3";
+    const details = document.createElement("div");
+    details.append(
+      makeText("h3", "h6 fw-bold mb-1", schedule.name),
+      makeText("p", "small mb-1", `${schedule.weekdays.map((day) => weekdayLabels[day]).join("·")} ${schedule.start_time.slice(0, 5)}–${schedule.end_time.slice(0, 5)}`),
+      makeText("p", "small text-secondary mb-0", `${schedule.playlist_name} · 볼륨 ${schedule.volume}% · Asia/Seoul`),
+    );
+    const badge = makeText("span", `badge ${schedule.is_enabled ? "text-bg-success" : "text-bg-secondary"}`, schedule.is_enabled ? "사용 중" : "중지됨");
+    header.append(details, badge);
+    article.append(header);
+
+    const controls = document.createElement("div");
+    controls.className = "d-flex flex-wrap gap-2 mt-3";
+    const toggle = makeText("button", "btn btn-sm btn-outline-info", schedule.is_enabled ? "사용 중지" : "다시 사용");
+    toggle.type = "button";
+    toggle.addEventListener("click", () => updateSchedule(schedule.id, { is_enabled: !schedule.is_enabled }));
+    const edit = makeText("button", "btn btn-sm btn-outline-light", "시간·볼륨 수정");
+    edit.type = "button";
+    edit.addEventListener("click", () => editSchedule(schedule));
+    const remove = makeText("button", "btn btn-sm btn-outline-danger", "삭제");
+    remove.type = "button";
+    remove.addEventListener("click", () => deleteSchedule(schedule));
+    controls.append(toggle, edit, remove);
+    article.append(controls);
+    return article;
+  }));
+}
+
+async function loadSchedules() {
+  try {
+    schedules = await request("/api/schedules");
+    renderSchedules();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+elements.scheduleCreateForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const weekdays = [...document.querySelectorAll("[data-schedule-weekday]:checked")]
+    .map((checkbox) => Number(checkbox.dataset.scheduleWeekday));
+  try {
+    await request("/api/schedules", {
+      method: "POST",
+      body: JSON.stringify({
+        name: elements.scheduleName.value,
+        weekdays,
+        start_time: elements.scheduleStart.value,
+        end_time: elements.scheduleEnd.value,
+        timezone: "Asia/Seoul",
+        playlist_id: elements.schedulePlaylist.value,
+        volume: Number(elements.scheduleVolume.value),
+        is_enabled: true,
+      }),
+    });
+    elements.scheduleCreateForm.reset();
+    elements.scheduleVolume.value = 30;
+    await loadSchedules();
+  } catch (error) {
+    showError(error);
+  }
+});
+
+async function updateSchedule(scheduleId, changes) {
+  try {
+    await request(`/api/schedules/${scheduleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    });
+    await loadSchedules();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function editSchedule(schedule) {
+  const startTime = window.prompt("시작 시간 (HH:MM)", schedule.start_time.slice(0, 5));
+  if (startTime === null) return;
+  const endTime = window.prompt("종료 시간 (HH:MM)", schedule.end_time.slice(0, 5));
+  if (endTime === null) return;
+  const volume = window.prompt("볼륨 (0–100)", String(schedule.volume));
+  if (volume === null) return;
+  updateSchedule(schedule.id, { start_time: startTime, end_time: endTime, volume: Number(volume) });
+}
+
+async function deleteSchedule(schedule) {
+  if (!window.confirm(`'${schedule.name}' 스케줄을 삭제할까요?`)) return;
+  try {
+    await request(`/api/schedules/${schedule.id}`, { method: "DELETE" });
+    await loadSchedules();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+elements.scheduleRefreshButton.addEventListener("click", loadSchedules);
+
 document.querySelectorAll("[data-action]").forEach((button) => {
   button.addEventListener("click", async () => {
     try {
@@ -430,3 +559,4 @@ elements.reviewRefreshButton.addEventListener("click", loadReviewList);
 request("/api/player/status").then(render).catch(showError);
 loadReviewList();
 loadPlaylistBuilder();
+loadSchedules();

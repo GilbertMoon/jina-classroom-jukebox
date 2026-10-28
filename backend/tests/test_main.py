@@ -1,7 +1,9 @@
 import asyncio
 from collections.abc import Generator
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from httpx import ASGITransport, AsyncClient
 import pytest
@@ -15,10 +17,21 @@ from backend.app.api import media as media_api
 from backend.app.api.player import player
 from backend.app.database import get_db
 from backend.app.main import app
-from backend.app.models import Base, ControlAuditLog, Playlist, SongRequest, Track, User
+from backend.app.models import (
+    Base,
+    ControlAuditLog,
+    PlaybackEvent,
+    Playlist,
+    PlaylistItem,
+    Schedule,
+    SongRequest,
+    Track,
+    User,
+)
 from backend.app.models.entities import MediaStatus, RequestStatus, UserRole
 from backend.app.security import hash_password
 from backend.app.services.media import MediaInspection
+from backend.app.services.scheduler import schedule_runner
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +78,7 @@ def isolated_database(tmp_path, monkeypatch) -> Generator[None, None, None]:
     app.dependency_overrides[get_db] = override_get_db
     app.state.testing_session = testing_session
     player.reset()
+    schedule_runner.reset()
     yield
     app.dependency_overrides.clear()
     del app.state.testing_session
@@ -591,6 +605,23 @@ def add_track(title: str, media_status: MediaStatus) -> UUID:
         return track.id
 
 
+def add_active_playlist(name: str = "Active Mix") -> UUID:
+    with app.state.testing_session() as session:
+        admin = session.scalar(select(User).where(User.role == UserRole.ADMIN))
+        track = Track(
+            title=f"{name} Song",
+            artist_or_channel="Test Artist",
+            duration_seconds=180,
+            media_status=MediaStatus.READY,
+            media_path=f"media/{name}.mp3",
+        )
+        playlist = Playlist(name=name, is_active=True, created_by=admin.id)
+        playlist.items = [PlaylistItem(track=track, position=1)]
+        session.add(playlist)
+        session.commit()
+        return playlist.id
+
+
 def test_logged_in_user_only_sees_ready_tracks() -> None:
     ready_id = add_track("Ready Song", MediaStatus.READY)
     add_track("Waiting Song", MediaStatus.PENDING_ACQUISITION)
@@ -726,6 +757,169 @@ def test_playlist_writes_require_admin_and_csrf() -> None:
             no_csrf = await admin.post(
                 "/api/playlists", json={"name": "No CSRF Mix"}
             )
+        return student_create, no_csrf
+
+    student_create, no_csrf = run(scenario())
+    assert student_create.status_code == 403
+    assert no_csrf.status_code == 403
+
+
+def test_admin_can_create_update_and_delete_schedule() -> None:
+    playlist_id = add_active_playlist()
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            csrf = await login(admin, "admin@example.com", "admin-password")
+            created = await admin.post(
+                "/api/schedules",
+                headers={"X-CSRF-Token": csrf},
+                json={
+                    "name": "Morning Class",
+                    "weekdays": [0, 1, 2, 3, 4],
+                    "start_time": "08:00",
+                    "end_time": "09:00",
+                    "timezone": "Asia/Seoul",
+                    "playlist_id": str(playlist_id),
+                    "volume": 25,
+                    "is_enabled": True,
+                },
+            )
+            updated = await admin.patch(
+                f"/api/schedules/{created.json()['id']}",
+                headers={"X-CSRF-Token": csrf},
+                json={"volume": 35, "is_enabled": False},
+            )
+            schedules = await admin.get("/api/schedules")
+            deleted = await admin.delete(
+                f"/api/schedules/{created.json()['id']}",
+                headers={"X-CSRF-Token": csrf},
+            )
+            return created, updated, schedules, deleted
+
+    created, updated, schedules, deleted = run(scenario())
+    assert created.status_code == 201
+    assert updated.json()["volume"] == 35
+    assert updated.json()["is_enabled"] is False
+    assert schedules.json()[0]["playlist_name"] == "Active Mix"
+    assert deleted.status_code == 204
+
+
+def test_schedule_rejects_overlap_cross_midnight_and_inactive_playlist() -> None:
+    active_playlist_id = add_active_playlist()
+    with app.state.testing_session() as session:
+        admin = session.scalar(select(User).where(User.role == UserRole.ADMIN))
+        inactive = Playlist(name="Inactive Mix", is_active=False, created_by=admin.id)
+        session.add(inactive)
+        session.commit()
+        inactive_id = inactive.id
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            csrf = await login(admin, "admin@example.com", "admin-password")
+            base = {
+                "weekdays": [0],
+                "timezone": "Asia/Seoul",
+                "playlist_id": str(active_playlist_id),
+                "volume": 30,
+                "is_enabled": True,
+            }
+            first = await admin.post(
+                "/api/schedules",
+                headers={"X-CSRF-Token": csrf},
+                json={**base, "name": "First", "start_time": "08:00", "end_time": "09:00"},
+            )
+            overlap = await admin.post(
+                "/api/schedules",
+                headers={"X-CSRF-Token": csrf},
+                json={**base, "name": "Overlap", "start_time": "08:30", "end_time": "09:30"},
+            )
+            cross_midnight = await admin.post(
+                "/api/schedules",
+                headers={"X-CSRF-Token": csrf},
+                json={**base, "name": "Night", "start_time": "23:00", "end_time": "01:00"},
+            )
+            inactive = await admin.post(
+                "/api/schedules",
+                headers={"X-CSRF-Token": csrf},
+                json={
+                    **base,
+                    "name": "Inactive",
+                    "start_time": "09:00",
+                    "end_time": "10:00",
+                    "playlist_id": str(inactive_id),
+                },
+            )
+            return first, overlap, cross_midnight, inactive
+
+    first, overlap, cross_midnight, inactive = run(scenario())
+    assert first.status_code == 201
+    assert overlap.status_code == 409
+    assert cross_midnight.status_code == 422
+    assert inactive.status_code == 409
+
+
+def test_schedule_runner_starts_and_stops_player_at_slot_boundaries() -> None:
+    playlist_id = add_active_playlist("Scheduled Mix")
+    with app.state.testing_session() as session:
+        schedule = Schedule(
+            name="Monday Morning",
+            weekdays=[0],
+            start_time=datetime.strptime("08:00", "%H:%M").time(),
+            end_time=datetime.strptime("09:00", "%H:%M").time(),
+            timezone="Asia/Seoul",
+            playlist_id=playlist_id,
+            volume=25,
+            is_enabled=True,
+        )
+        session.add(schedule)
+        session.commit()
+
+    seoul = ZoneInfo("Asia/Seoul")
+    with app.state.testing_session() as session:
+        schedule_runner.evaluate(datetime(2026, 10, 26, 8, 30, tzinfo=seoul), session)
+    playing = player.status()
+    assert playing["playback_state"] == "playing"
+    assert playing["current_track"]["title"] == "Scheduled Mix Song"
+    assert playing["volume"] == 25
+
+    with app.state.testing_session() as session:
+        running_event = session.scalar(select(PlaybackEvent))
+        assert running_event is not None
+        assert running_event.result == "RUNNING"
+
+    with app.state.testing_session() as session:
+        schedule_runner.evaluate(datetime(2026, 10, 26, 9, 0, tzinfo=seoul), session)
+    assert player.status()["playback_state"] == "stopped"
+    with app.state.testing_session() as session:
+        completed_event = session.scalar(select(PlaybackEvent))
+        assert completed_event.result == "COMPLETED"
+        assert completed_event.ended_at is not None
+
+
+def test_schedule_writes_require_admin_and_csrf() -> None:
+    playlist_id = add_active_playlist()
+    payload = {
+        "name": "Protected Schedule",
+        "weekdays": [0],
+        "start_time": "08:00",
+        "end_time": "09:00",
+        "playlist_id": str(playlist_id),
+    }
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            student_create = await student.post(
+                "/api/schedules",
+                headers={"X-CSRF-Token": student_csrf},
+                json=payload,
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            no_csrf = await admin.post("/api/schedules", json=payload)
         return student_create, no_csrf
 
     student_create, no_csrf = run(scenario())

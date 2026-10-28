@@ -1,6 +1,6 @@
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Iterable
 
 
 class PlaybackState(StrEnum):
@@ -11,7 +11,7 @@ class PlaybackState(StrEnum):
 
 @dataclass(frozen=True)
 class Track:
-    id: int
+    id: Any
     title: str
     artist: str
     duration_seconds: int
@@ -21,7 +21,7 @@ class FakePlayer:
     """An in-memory player used before the Ubuntu MPD server is connected."""
 
     def __init__(self) -> None:
-        self._playlist = (
+        self._demo_playlist = (
             Track(1, "Morning Compile", "AX2 Studio", 198),
             Track(2, "Campus Loop", "Jina Lab", 224),
             Track(3, "After Class", "Code & Chords", 187),
@@ -29,10 +29,19 @@ class FakePlayer:
         self.reset()
 
     def reset(self) -> None:
+        self._playlist = self._demo_playlist
         self._state = PlaybackState.STOPPED
         self._current_index = 0
         self._volume = 30
         self._muted = False
+        self._progress_seconds = 0
+
+    def load_playlist(self, tracks: Iterable[Track]) -> None:
+        loaded_tracks = tuple(tracks)
+        if not loaded_tracks:
+            raise ValueError("At least one track is required.")
+        self._playlist = loaded_tracks
+        self._current_index = 0
         self._progress_seconds = 0
 
     def status(self) -> dict[str, Any]:
@@ -76,3 +85,6 @@ class FakePlayer:
     def set_muted(self, muted: bool) -> dict[str, Any]:
         self._muted = muted
         return self.status()
+
+
+player = FakePlayer()
