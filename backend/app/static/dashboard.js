@@ -22,7 +22,21 @@ const elements = {
   logoutButton: document.querySelector("#logout-button"),
   reviewList: document.querySelector("#review-list"),
   reviewRefreshButton: document.querySelector("#review-refresh-button"),
+  playlistCreateForm: document.querySelector("#playlist-create-form"),
+  playlistName: document.querySelector("#playlist-name"),
+  playlistDescription: document.querySelector("#playlist-description"),
+  playlistSelect: document.querySelector("#playlist-select"),
+  readyTrackSelect: document.querySelector("#ready-track-select"),
+  playlistQueue: document.querySelector("#playlist-queue"),
+  playlistAddTrack: document.querySelector("#playlist-add-track"),
+  playlistSaveButton: document.querySelector("#playlist-save-button"),
+  playlistActivateButton: document.querySelector("#playlist-activate-button"),
+  playlistRefreshButton: document.querySelector("#playlist-refresh-button"),
 };
+
+let readyTracks = [];
+let playlists = [];
+let editingTrackIds = [];
 
 function formatTime(seconds) {
   const minutes = Math.floor(seconds / 60);
@@ -54,7 +68,7 @@ function render(state) {
 }
 
 function showError(error) {
-  elements.alert.textContent = `플레이어 요청에 실패했습니다: ${error.message}`;
+  elements.alert.textContent = `요청 처리에 실패했습니다: ${error.message}`;
   elements.alert.classList.remove("d-none");
 }
 
@@ -218,6 +232,144 @@ async function reviewRequest(requestId, decision, rejectReason = null) {
   }
 }
 
+function currentPlaylist() {
+  return playlists.find((playlist) => playlist.id === elements.playlistSelect.value);
+}
+
+function renderPlaylistSelectors(selectedPlaylistId = null) {
+  elements.playlistSelect.replaceChildren(...playlists.map((playlist) => {
+    const option = document.createElement("option");
+    option.value = playlist.id;
+    option.textContent = `${playlist.is_active ? "● " : ""}${playlist.name}`;
+    return option;
+  }));
+  elements.readyTrackSelect.replaceChildren(...readyTracks.map((track) => {
+    const option = document.createElement("option");
+    option.value = track.id;
+    option.textContent = `${track.title} · ${track.artist_or_channel || "가수 미입력"}`;
+    return option;
+  }));
+
+  if (selectedPlaylistId && playlists.some((item) => item.id === selectedPlaylistId)) {
+    elements.playlistSelect.value = selectedPlaylistId;
+  }
+  const playlist = currentPlaylist();
+  editingTrackIds = playlist ? playlist.items.map((item) => item.id) : [];
+  renderPlaylistQueue();
+  const disabled = !playlist;
+  elements.playlistSaveButton.disabled = disabled;
+  elements.playlistActivateButton.disabled = disabled;
+  elements.playlistAddTrack.disabled = disabled || !readyTracks.length;
+}
+
+function renderPlaylistQueue() {
+  if (!editingTrackIds.length) {
+    elements.playlistQueue.innerHTML = '<p class="small text-secondary mb-0">아직 편성된 곡이 없습니다.</p>';
+    return;
+  }
+  const tracksById = new Map(readyTracks.map((track) => [track.id, track]));
+  elements.playlistQueue.replaceChildren(...editingTrackIds.map((trackId, index) => {
+    const track = tracksById.get(trackId) || currentPlaylist()?.items.find((item) => item.id === trackId);
+    const row = document.createElement("div");
+    row.className = "playlist-queue-item";
+    const label = makeText("span", "small", `${index + 1}. ${track?.title || "알 수 없는 곡"}`);
+    const controls = document.createElement("div");
+    controls.className = "btn-group btn-group-sm";
+    const up = makeText("button", "btn btn-outline-light", "↑");
+    up.type = "button";
+    up.disabled = index === 0;
+    up.addEventListener("click", () => movePlaylistTrack(index, -1));
+    const down = makeText("button", "btn btn-outline-light", "↓");
+    down.type = "button";
+    down.disabled = index === editingTrackIds.length - 1;
+    down.addEventListener("click", () => movePlaylistTrack(index, 1));
+    const remove = makeText("button", "btn btn-outline-danger", "삭제");
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      editingTrackIds.splice(index, 1);
+      renderPlaylistQueue();
+    });
+    controls.append(up, down, remove);
+    row.append(label, controls);
+    return row;
+  }));
+}
+
+function movePlaylistTrack(index, offset) {
+  const target = index + offset;
+  [editingTrackIds[index], editingTrackIds[target]] = [editingTrackIds[target], editingTrackIds[index]];
+  renderPlaylistQueue();
+}
+
+async function loadPlaylistBuilder(selectedPlaylistId = null) {
+  try {
+    [readyTracks, playlists] = await Promise.all([
+      request("/api/tracks"),
+      request("/api/playlists"),
+    ]);
+    renderPlaylistSelectors(selectedPlaylistId);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+elements.playlistCreateForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const created = await request("/api/playlists", {
+      method: "POST",
+      body: JSON.stringify({
+        name: elements.playlistName.value,
+        description: elements.playlistDescription.value || null,
+      }),
+    });
+    elements.playlistCreateForm.reset();
+    await loadPlaylistBuilder(created.id);
+  } catch (error) {
+    showError(error);
+  }
+});
+
+elements.playlistSelect.addEventListener("change", () => {
+  const playlist = currentPlaylist();
+  editingTrackIds = playlist ? playlist.items.map((item) => item.id) : [];
+  renderPlaylistQueue();
+});
+
+elements.playlistAddTrack.addEventListener("click", () => {
+  const trackId = elements.readyTrackSelect.value;
+  if (!trackId || editingTrackIds.includes(trackId)) return;
+  editingTrackIds.push(trackId);
+  renderPlaylistQueue();
+});
+
+elements.playlistSaveButton.addEventListener("click", async () => {
+  const playlist = currentPlaylist();
+  if (!playlist) return;
+  try {
+    await request(`/api/playlists/${playlist.id}/items`, {
+      method: "PUT",
+      body: JSON.stringify({ track_ids: editingTrackIds }),
+    });
+    await loadPlaylistBuilder(playlist.id);
+  } catch (error) {
+    showError(error);
+  }
+});
+
+elements.playlistActivateButton.addEventListener("click", async () => {
+  const playlist = currentPlaylist();
+  if (!playlist) return;
+  try {
+    await request(`/api/playlists/${playlist.id}/activate`, { method: "POST" });
+    await loadPlaylistBuilder(playlist.id);
+  } catch (error) {
+    showError(error);
+  }
+});
+
+elements.playlistRefreshButton.addEventListener("click", () => loadPlaylistBuilder(elements.playlistSelect.value));
+
 document.querySelectorAll("[data-action]").forEach((button) => {
   button.addEventListener("click", async () => {
     try {
@@ -277,3 +429,4 @@ elements.reviewRefreshButton.addEventListener("click", loadReviewList);
 
 request("/api/player/status").then(render).catch(showError);
 loadReviewList();
+loadPlaylistBuilder();

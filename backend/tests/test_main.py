@@ -15,7 +15,7 @@ from backend.app.api import media as media_api
 from backend.app.api.player import player
 from backend.app.database import get_db
 from backend.app.main import app
-from backend.app.models import Base, ControlAuditLog, SongRequest, Track, User
+from backend.app.models import Base, ControlAuditLog, Playlist, SongRequest, Track, User
 from backend.app.models.entities import MediaStatus, RequestStatus, UserRole
 from backend.app.security import hash_password
 from backend.app.services.media import MediaInspection
@@ -574,6 +574,162 @@ def test_media_upload_requires_admin_and_csrf() -> None:
 
     student_upload, no_csrf = run(scenario())
     assert student_upload.status_code == 403
+    assert no_csrf.status_code == 403
+
+
+def add_track(title: str, media_status: MediaStatus) -> UUID:
+    with app.state.testing_session() as session:
+        track = Track(
+            title=title,
+            artist_or_channel="Test Artist",
+            duration_seconds=180,
+            media_status=media_status,
+            media_path=f"media/{title}.mp3" if media_status == MediaStatus.READY else None,
+        )
+        session.add(track)
+        session.commit()
+        return track.id
+
+
+def test_logged_in_user_only_sees_ready_tracks() -> None:
+    ready_id = add_track("Ready Song", MediaStatus.READY)
+    add_track("Waiting Song", MediaStatus.PENDING_ACQUISITION)
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            await login(student, "student@example.com", "student-password")
+            return await student.get("/api/tracks")
+
+    response = run(scenario())
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [str(ready_id)]
+
+
+def test_admin_can_create_and_order_playlist() -> None:
+    first_id = add_track("First Song", MediaStatus.READY)
+    second_id = add_track("Second Song", MediaStatus.READY)
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            csrf = await login(admin, "admin@example.com", "admin-password")
+            created = await admin.post(
+                "/api/playlists",
+                headers={"X-CSRF-Token": csrf},
+                json={"name": "Morning Mix", "description": "등교 시간 음악"},
+            )
+            ordered = await admin.put(
+                f"/api/playlists/{created.json()['id']}/items",
+                headers={"X-CSRF-Token": csrf},
+                json={"track_ids": [str(second_id), str(first_id)]},
+            )
+            playlists = await admin.get("/api/playlists")
+            return created, ordered, playlists
+
+    created, ordered, playlists = run(scenario())
+    assert created.status_code == 201
+    assert [item["title"] for item in ordered.json()["items"]] == [
+        "Second Song",
+        "First Song",
+    ]
+    assert [item["position"] for item in playlists.json()[0]["items"]] == [1, 2]
+
+    with app.state.testing_session() as session:
+        actions = set(session.scalars(select(ControlAuditLog.action)).all())
+        assert "playlist.create" in actions
+        assert "playlist.items.update" in actions
+
+
+def test_playlist_rejects_duplicate_and_unready_tracks() -> None:
+    ready_id = add_track("Ready Song", MediaStatus.READY)
+    waiting_id = add_track("Waiting Song", MediaStatus.PENDING_ACQUISITION)
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            csrf = await login(admin, "admin@example.com", "admin-password")
+            created = await admin.post(
+                "/api/playlists",
+                headers={"X-CSRF-Token": csrf},
+                json={"name": "Validation Mix"},
+            )
+            playlist_id = created.json()["id"]
+            duplicate = await admin.put(
+                f"/api/playlists/{playlist_id}/items",
+                headers={"X-CSRF-Token": csrf},
+                json={"track_ids": [str(ready_id), str(ready_id)]},
+            )
+            unready = await admin.put(
+                f"/api/playlists/{playlist_id}/items",
+                headers={"X-CSRF-Token": csrf},
+                json={"track_ids": [str(waiting_id)]},
+            )
+            return duplicate, unready
+
+    duplicate, unready = run(scenario())
+    assert duplicate.status_code == 422
+    assert unready.status_code == 409
+
+
+def test_activating_playlist_deactivates_previous_playlist() -> None:
+    track_id = add_track("Ready Song", MediaStatus.READY)
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            csrf = await login(admin, "admin@example.com", "admin-password")
+            playlist_ids = []
+            for name in ("First Mix", "Second Mix"):
+                created = await admin.post(
+                    "/api/playlists",
+                    headers={"X-CSRF-Token": csrf},
+                    json={"name": name},
+                )
+                playlist_id = created.json()["id"]
+                playlist_ids.append(playlist_id)
+                await admin.put(
+                    f"/api/playlists/{playlist_id}/items",
+                    headers={"X-CSRF-Token": csrf},
+                    json={"track_ids": [str(track_id)]},
+                )
+            first_activation = await admin.post(
+                f"/api/playlists/{playlist_ids[0]}/activate",
+                headers={"X-CSRF-Token": csrf},
+            )
+            second_activation = await admin.post(
+                f"/api/playlists/{playlist_ids[1]}/activate",
+                headers={"X-CSRF-Token": csrf},
+            )
+            playlists = await admin.get("/api/playlists")
+            return first_activation, second_activation, playlists, playlist_ids
+
+    first_activation, second_activation, playlists, playlist_ids = run(scenario())
+    assert first_activation.status_code == 200
+    assert second_activation.status_code == 200
+    active_ids = [item["id"] for item in playlists.json() if item["is_active"]]
+    assert active_ids == [playlist_ids[1]]
+
+
+def test_playlist_writes_require_admin_and_csrf() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            student_create = await student.post(
+                "/api/playlists",
+                headers={"X-CSRF-Token": student_csrf},
+                json={"name": "Student Mix"},
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            no_csrf = await admin.post(
+                "/api/playlists", json={"name": "No CSRF Mix"}
+            )
+        return student_create, no_csrf
+
+    student_create, no_csrf = run(scenario())
+    assert student_create.status_code == 403
     assert no_csrf.status_code == 403
 
 

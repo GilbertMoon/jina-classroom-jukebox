@@ -11,7 +11,9 @@ from backend.app.api.auth import router as auth_router
 from backend.app.api.health import router as health_router
 from backend.app.api.media import router as media_router
 from backend.app.api.player import router as player_router
+from backend.app.api.playlists import router as playlists_router
 from backend.app.api.song_requests import router as song_requests_router
+from backend.app.api.tracks import router as tracks_router
 from backend.app.auth_dependencies import require_admin, require_student
 from backend.app.models import User
 
@@ -36,7 +38,9 @@ app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(media_router)
 app.include_router(player_router)
+app.include_router(playlists_router)
 app.include_router(song_requests_router)
+app.include_router(tracks_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 templates = Jinja2Templates(directory=APP_DIR / "templates")

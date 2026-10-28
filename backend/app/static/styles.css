@@ -52,6 +52,22 @@ body {
 .request-status-approved { background: #15803d; }
 .request-status-rejected { background: #b91c1c; }
 
+.playlist-queue {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.playlist-queue-item {
+  align-items: center;
+  background: rgba(30, 41, 59, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.6rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.65rem 0.75rem;
+}
+
 .eyebrow,
 .card-label {
   color: var(--cyan);
