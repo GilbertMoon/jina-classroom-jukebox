@@ -13,7 +13,7 @@ from backend.app.api.player import player
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import Base, ControlAuditLog, SongRequest, Track, User
-from backend.app.models.entities import UserRole
+from backend.app.models.entities import MediaStatus, RequestStatus, UserRole
 from backend.app.security import hash_password
 
 
@@ -82,6 +82,20 @@ async def login(client: AsyncClient, email: str, password: str) -> str:
     )
     assert response.status_code == 200
     return response.json()["csrf_token"]
+
+
+async def create_student_request(client: AsyncClient, csrf_token: str) -> dict:
+    response = await client.post(
+        "/api/requests",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "youtube_url": "https://youtu.be/dQw4w9WgXcQ",
+            "title": "Test Song",
+            "artist_or_channel": "Test Channel",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
 
 
 def test_read_root() -> None:
@@ -278,6 +292,106 @@ def test_song_request_requires_student_role_and_csrf() -> None:
     no_csrf, admin_request = run(scenario())
     assert no_csrf.status_code == 403
     assert admin_request.status_code == 403
+
+
+def test_admin_can_list_and_approve_pending_request() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            requests = await admin.get("/api/requests")
+            approved = await admin.post(
+                f"/api/requests/{created['id']}/review",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"decision": "APPROVE"},
+            )
+            repeated = await admin.post(
+                f"/api/requests/{created['id']}/review",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"decision": "REJECT", "reject_reason": "too late"},
+            )
+            return requests, approved, repeated
+
+    requests, approved, repeated = run(scenario())
+    assert requests.status_code == 200
+    assert requests.json()[0]["requester_email"] == "student@example.com"
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "APPROVED"
+    assert approved.json()["reviewed_at"] is not None
+    assert repeated.status_code == 409
+
+    with app.state.testing_session() as session:
+        song_request = session.scalar(select(SongRequest))
+        assert song_request is not None
+        assert song_request.status == RequestStatus.APPROVED
+        assert song_request.reviewed_by is not None
+        assert song_request.track.media_status == MediaStatus.PENDING_ACQUISITION
+        audit = session.scalar(
+            select(ControlAuditLog).where(ControlAuditLog.action == "request.approve")
+        )
+        assert audit is not None
+        assert audit.payload["request_id"] == str(song_request.id)
+
+
+def test_rejection_requires_reason_and_is_visible_to_student() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            without_reason = await admin.post(
+                f"/api/requests/{created['id']}/review",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"decision": "REJECT"},
+            )
+            rejected = await admin.post(
+                f"/api/requests/{created['id']}/review",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"decision": "REJECT", "reject_reason": "수업 분위기와 맞지 않아요"},
+            )
+
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            await login(student, "student@example.com", "student-password")
+            own_requests = await student.get("/api/requests/me")
+        return without_reason, rejected, own_requests
+
+    without_reason, rejected, own_requests = run(scenario())
+    assert without_reason.status_code == 422
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "REJECTED"
+    assert own_requests.json()[0]["reject_reason"] == "수업 분위기와 맞지 않아요"
+
+
+def test_review_requires_admin_role_and_csrf() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+            student_review = await student.post(
+                f"/api/requests/{created['id']}/review",
+                headers={"X-CSRF-Token": student_csrf},
+                json={"decision": "APPROVE"},
+            )
+
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            no_csrf = await admin.post(
+                f"/api/requests/{created['id']}/review",
+                json={"decision": "APPROVE"},
+            )
+        return student_review, no_csrf
+
+    student_review, no_csrf = run(scenario())
+    assert student_review.status_code == 403
+    assert no_csrf.status_code == 403
 
 
 def test_admin_control_requires_csrf_and_creates_audit_log() -> None:

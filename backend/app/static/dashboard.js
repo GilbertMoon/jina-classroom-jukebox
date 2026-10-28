@@ -20,6 +20,8 @@ const elements = {
   volumeValue: document.querySelector("#volume-value"),
   muteButton: document.querySelector("#mute-button"),
   logoutButton: document.querySelector("#logout-button"),
+  reviewList: document.querySelector("#review-list"),
+  reviewRefreshButton: document.querySelector("#review-refresh-button"),
 };
 
 function formatTime(seconds) {
@@ -67,9 +69,94 @@ async function request(url, options = {}) {
     },
   });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || `HTTP ${response.status}`);
   }
   return response.json();
+}
+
+const reviewStatusLabels = {
+  PENDING: "승인 대기",
+  APPROVED: "승인",
+  REJECTED: "반려",
+};
+
+function makeText(tagName, className, text) {
+  const element = document.createElement(tagName);
+  element.className = className;
+  element.textContent = text;
+  return element;
+}
+
+function renderReviewList(items) {
+  if (!items.length) {
+    elements.reviewList.innerHTML = '<p class="text-secondary mb-0">접수된 신청곡이 없습니다.</p>';
+    return;
+  }
+
+  elements.reviewList.replaceChildren(...items.map((item) => {
+    const article = document.createElement("article");
+    article.className = "request-item border rounded-3 p-3";
+
+    const header = document.createElement("div");
+    header.className = "d-flex flex-wrap justify-content-between gap-3";
+    const details = document.createElement("div");
+    details.append(
+      makeText("h3", "h6 fw-bold mb-1", item.title),
+      makeText("p", "small text-secondary mb-1", item.artist_or_channel || "가수·채널 미입력"),
+      makeText("p", "small mb-2", `신청자: ${item.requester_name} (${item.requester_email})`),
+    );
+    const link = document.createElement("a");
+    link.href = item.youtube_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.className = "small";
+    link.textContent = "YouTube에서 검토";
+    details.append(link);
+    const badge = makeText("span", `badge request-status-${item.status.toLowerCase()}`, reviewStatusLabels[item.status] || item.status);
+    header.append(details, badge);
+    article.append(header);
+
+    if (item.comment) article.append(makeText("p", "small mt-3 mb-0", `학생 메모: ${item.comment}`));
+    if (item.reject_reason) article.append(makeText("p", "small text-danger mt-2 mb-0", `반려 사유: ${item.reject_reason}`));
+
+    if (item.status === "PENDING") {
+      const controls = document.createElement("div");
+      controls.className = "d-flex flex-wrap gap-2 mt-3";
+      const approve = makeText("button", "btn btn-sm btn-success", "승인");
+      approve.type = "button";
+      approve.addEventListener("click", () => reviewRequest(item.id, "APPROVE"));
+      const reject = makeText("button", "btn btn-sm btn-outline-danger", "반려");
+      reject.type = "button";
+      reject.addEventListener("click", () => {
+        const reason = window.prompt("반려 사유를 입력해 주세요.");
+        if (reason !== null) reviewRequest(item.id, "REJECT", reason);
+      });
+      controls.append(approve, reject);
+      article.append(controls);
+    }
+    return article;
+  }));
+}
+
+async function loadReviewList() {
+  try {
+    renderReviewList(await request("/api/requests"));
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function reviewRequest(requestId, decision, rejectReason = null) {
+  try {
+    await request(`/api/requests/${requestId}/review`, {
+      method: "POST",
+      body: JSON.stringify({ decision, reject_reason: rejectReason }),
+    });
+    await loadReviewList();
+  } catch (error) {
+    showError(error);
+  }
 }
 
 document.querySelectorAll("[data-action]").forEach((button) => {
@@ -127,4 +214,7 @@ elements.logoutButton.addEventListener("click", async () => {
   }
 });
 
+elements.reviewRefreshButton.addEventListener("click", loadReviewList);
+
 request("/api/player/status").then(render).catch(showError);
+loadReviewList();
