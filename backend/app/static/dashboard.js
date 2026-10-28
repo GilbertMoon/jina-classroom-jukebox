@@ -60,10 +60,11 @@ function showError(error) {
 
 async function request(url, options = {}) {
   elements.alert.classList.add("d-none");
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(url, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(!isFormData ? { "Content-Type": "application/json" } : {}),
       ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": csrfToken } : {}),
       ...options.headers,
     },
@@ -135,8 +136,66 @@ function renderReviewList(items) {
       controls.append(approve, reject);
       article.append(controls);
     }
+
+    if (item.status === "APPROVED" && item.media_status !== "READY") {
+      article.append(createMediaUploadForm(item));
+    } else if (item.media_status === "READY") {
+      article.append(makeText("p", "small text-success mt-3 mb-0", `재생 준비 완료 · ${item.media_original_filename || "등록된 음원"}`));
+    }
     return article;
   }));
+}
+
+function createMediaUploadForm(item) {
+  const form = document.createElement("form");
+  form.className = "media-upload-form border-top mt-3 pt-3";
+
+  const title = makeText("p", "small fw-bold mb-2", "권한이 확인된 로컬 음원 등록");
+  const file = document.createElement("input");
+  file.type = "file";
+  file.accept = ".mp3,.ogg,.flac,audio/mpeg,audio/ogg,audio/flac";
+  file.className = "form-control form-control-sm mb-2";
+  file.required = true;
+
+  const note = document.createElement("input");
+  note.type = "text";
+  note.className = "form-control form-control-sm mb-2";
+  note.placeholder = "권리 근거 (예: 직접 제작, 사용 허가 문서 확인)";
+  note.maxLength = 500;
+  note.required = true;
+
+  const checkWrapper = document.createElement("label");
+  checkWrapper.className = "form-check small mb-2";
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.className = "form-check-input";
+  check.required = true;
+  const checkText = document.createElement("span");
+  checkText.className = "form-check-label ms-1";
+  checkText.textContent = "이 파일의 저장·재생 권한을 확인했습니다.";
+  checkWrapper.append(check, checkText);
+
+  const submit = makeText("button", "btn btn-sm btn-primary", "음원 등록");
+  submit.type = "submit";
+  form.append(title, file, note, checkWrapper, submit);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    const body = new FormData();
+    body.append("track_id", item.track_id);
+    body.append("rights_confirmed", String(check.checked));
+    body.append("rights_note", note.value);
+    body.append("file", file.files[0]);
+    try {
+      await request("/api/media/upload", { method: "POST", body });
+      await loadReviewList();
+    } catch (error) {
+      showError(error);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  return form;
 }
 
 async function loadReviewList() {

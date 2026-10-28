@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     JSON,
     Boolean,
+    BigInteger,
     DateTime,
     Enum,
     ForeignKey,
@@ -79,6 +80,10 @@ class Track(Base):
     media_path: Mapped[str | None] = mapped_column(String(1024))
     sha256: Mapped[str | None] = mapped_column(String(64), unique=True)
     rights_status: Mapped[str | None] = mapped_column(String(50))
+    rights_note: Mapped[str | None] = mapped_column(String(500))
+    media_original_filename: Mapped[str | None] = mapped_column(String(255))
+    media_content_type: Mapped[str | None] = mapped_column(String(100))
+    media_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

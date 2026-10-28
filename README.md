@@ -2,7 +2,7 @@
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
-현재 단계는 **STEP 06: 관리자의 신청곡 승인·반려**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
+현재 단계는 **STEP 07: 이용 권한이 확인된 로컬 음원 등록**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
 
 ## 지금 구현된 기능
 
@@ -26,6 +26,10 @@
 - 관리자의 전체 신청곡 조회와 승인·반려
 - 반려 사유, 검토 관리자와 검토 시각 기록
 - 승인된 곡의 음원 확보 대기 상태 전환과 감사 로그
+- 승인된 곡의 MP3·OGG·FLAC 수동 업로드
+- 파일 크기·내부 오디오 구조·재생 시간·SHA-256 중복 검사
+- 이용 권한 확인 근거와 파일 메타데이터 저장
+- 사용자 파일명 대신 곡 UUID로 안전하게 로컬 저장
 - pytest 자동 테스트
 - GitHub Actions 자동 테스트
 
@@ -40,7 +44,9 @@ jina-classroom-jukebox/
 │   ├── app/security.py         # 비밀번호 해시와 CSRF 토큰
 │   ├── app/api/player.py       # 플레이어 제어 API
 │   ├── app/api/song_requests.py # 신청곡 등록·조회 API
+│   ├── app/api/media.py        # 권한 확인 음원 업로드 API
 │   ├── app/youtube.py          # YouTube 주소 검증·정규화
+│   ├── app/services/media.py   # 오디오 파일 구조·재생 시간 검사
 │   ├── app/services/player.py  # 메모리에서 동작하는 FakePlayer
 │   ├── app/templates/          # 관리자 HTML 화면
 │   ├── app/static/             # 화면 CSS와 JavaScript
@@ -90,7 +96,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`25 passed`가 표시되면 서버, 로그인, 역할별 권한, 신청·검토와 모의 플레이어 API가 정상이라는 뜻입니다.
+`28 passed`가 표시되면 서버, 로그인, 역할별 권한, 신청·검토·음원 등록과 모의 플레이어 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
@@ -123,6 +129,8 @@ Copy-Item .env.example .env
 - `SESSION_SECRET`: 로그인 쿠키의 위조 여부를 확인하는 긴 무작위 문자열
 - `DEMO_ADMIN_PASSWORD`: 개발용 관리자 비밀번호
 - `DEMO_STUDENT_PASSWORD`: 개발용 학생 비밀번호
+- `MEDIA_ROOT`: 권한이 확인된 음원 파일을 저장할 비공개 폴더
+- `MAX_MEDIA_SIZE_MB`: 음원 파일 하나의 최대 크기(MB, 기본 50)
 
 ## PostgreSQL 데이터베이스 준비
 
@@ -200,6 +208,19 @@ python -m scripts.seed_demo
 
 상태는 결재 문서의 도장과 비슷합니다. 처음에는 `PENDING`이고 한 번 승인 또는 반려된 신청은 다시 처리할 수 없도록 서버가 막습니다.
 
+## STEP 07이 동작하는 순서
+
+1. 관리자가 신청곡을 승인하면 곡은 `PENDING_ACQUISITION` 상태가 됩니다.
+2. 관리자 승인함에서 MP3, OGG 또는 FLAC 파일을 선택합니다.
+3. 파일을 저장하고 재생할 권리가 있다는 확인과 근거를 입력합니다.
+4. `POST /api/media/upload`가 관리자 권한과 CSRF 토큰을 확인합니다.
+5. 서버가 확장자, 최대 크기, 실제 오디오 구조와 재생 시간을 검사합니다.
+6. SHA-256 해시로 이미 등록된 동일 파일인지 확인합니다.
+7. 통과한 파일은 사용자 파일명이 아닌 `<track-id>.<확장자>`로 `MEDIA_ROOT`에 저장됩니다.
+8. 곡 상태가 `READY`가 되고 파일 정보와 관리자 감사 로그가 저장됩니다.
+
+`APPROVED`는 “이 신청을 받아들였다”는 뜻이고, `READY`는 “권한과 파일 검사가 끝나 실제 재생 준비가 됐다”는 뜻입니다. 두 상태는 서로 다릅니다. 이 단계는 YouTube 영상을 다운로드하거나 변환하지 않습니다.
+
 `GET /health/live`는 웹 프로세스가 살아 있는지만 확인합니다. `GET /health/ready`는 PostgreSQL 연결까지 성공해야 `200`을 반환합니다. DB가 연결되지 않으면 안전하게 `503`을 반환합니다.
 
 GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마이그레이션과 예시 데이터 생성을 실제 PostgreSQL에서도 자동 검증합니다.
@@ -213,4 +234,4 @@ GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마�
 
 ## 다음 단계
 
-STEP 07에서는 이용 권한이 확인된 로컬 음원 파일 등록 기반을 구현합니다.
+STEP 08에서는 재생 준비가 끝난 곡으로 플레이리스트를 만들고 순서를 편성합니다.

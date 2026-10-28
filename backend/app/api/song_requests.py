@@ -50,6 +50,9 @@ class SongRequestResponse(BaseModel):
 
 
 class AdminSongRequestResponse(SongRequestResponse):
+    track_id: UUID
+    media_status: MediaStatus
+    media_original_filename: str | None
     requester_name: str
     requester_email: str
     reviewed_at: datetime | None
@@ -84,6 +87,9 @@ def admin_response_from_model(song_request: SongRequest) -> AdminSongRequestResp
     basic = response_from_model(song_request)
     return AdminSongRequestResponse(
         **basic.model_dump(),
+        track_id=song_request.track.id,
+        media_status=song_request.track.media_status,
+        media_original_filename=song_request.track.media_original_filename,
         requester_name=song_request.requester.name,
         requester_email=song_request.requester.email,
         reviewed_at=song_request.reviewed_at,

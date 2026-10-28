@@ -1,5 +1,7 @@
 import asyncio
 from collections.abc import Generator
+from pathlib import Path
+from uuid import UUID
 
 from httpx import ASGITransport, AsyncClient
 import pytest
@@ -9,16 +11,20 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app.api import health
+from backend.app.api import media as media_api
 from backend.app.api.player import player
 from backend.app.database import get_db
 from backend.app.main import app
 from backend.app.models import Base, ControlAuditLog, SongRequest, Track, User
 from backend.app.models.entities import MediaStatus, RequestStatus, UserRole
 from backend.app.security import hash_password
+from backend.app.services.media import MediaInspection
 
 
 @pytest.fixture(autouse=True)
-def isolated_database() -> Generator[None, None, None]:
+def isolated_database(tmp_path, monkeypatch) -> Generator[None, None, None]:
+    monkeypatch.setenv("MEDIA_ROOT", str(tmp_path / "media"))
+    monkeypatch.setenv("MAX_MEDIA_SIZE_MB", "50")
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -84,17 +90,34 @@ async def login(client: AsyncClient, email: str, password: str) -> str:
     return response.json()["csrf_token"]
 
 
-async def create_student_request(client: AsyncClient, csrf_token: str) -> dict:
+async def create_student_request(
+    client: AsyncClient,
+    csrf_token: str,
+    video_id: str = "dQw4w9WgXcQ",
+    title: str = "Test Song",
+) -> dict:
     response = await client.post(
         "/api/requests",
         headers={"X-CSRF-Token": csrf_token},
         json={
-            "youtube_url": "https://youtu.be/dQw4w9WgXcQ",
-            "title": "Test Song",
+            "youtube_url": f"https://youtu.be/{video_id}",
+            "title": title,
             "artist_or_channel": "Test Channel",
         },
     )
     assert response.status_code == 201
+    return response.json()
+
+
+async def approve_request(
+    client: AsyncClient, csrf_token: str, request_id: str
+) -> dict:
+    response = await client.post(
+        f"/api/requests/{request_id}/review",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"decision": "APPROVE"},
+    )
+    assert response.status_code == 200
     return response.json()
 
 
@@ -391,6 +414,166 @@ def test_review_requires_admin_role_and_csrf() -> None:
 
     student_review, no_csrf = run(scenario())
     assert student_review.status_code == 403
+    assert no_csrf.status_code == 403
+
+
+def test_admin_can_upload_authorized_audio_for_approved_track(monkeypatch) -> None:
+    monkeypatch.setattr(
+        media_api.manual_upload_provider,
+        "inspect",
+        lambda path, extension: MediaInspection(duration_seconds=123),
+    )
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            approved = await approve_request(admin, admin_csrf, created["id"])
+            uploaded = await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": approved["track_id"],
+                    "rights_confirmed": "true",
+                    "rights_note": "직접 제작한 수업용 음원",
+                },
+                files={"file": ("../../lesson.mp3", b"test-audio-bytes", "audio/mpeg")},
+            )
+            return approved, uploaded
+
+    approved, uploaded = run(scenario())
+    assert uploaded.status_code == 200
+    assert uploaded.json()["status"] == "READY"
+    assert uploaded.json()["duration_seconds"] == 123
+
+    with app.state.testing_session() as session:
+        track = session.get(Track, UUID(approved["track_id"]))
+        assert track is not None
+        assert track.media_status == MediaStatus.READY
+        assert track.media_original_filename == "lesson.mp3"
+        assert track.rights_status == "CONFIRMED"
+        assert track.rights_note == "직접 제작한 수업용 음원"
+        assert track.media_path is not None
+        media_path = Path(track.media_path)
+        assert media_path.name == f"{track.id}.mp3"
+        assert media_path.read_bytes() == b"test-audio-bytes"
+        audit = session.scalar(
+            select(ControlAuditLog).where(ControlAuditLog.action == "media.upload")
+        )
+        assert audit is not None
+
+
+def test_media_upload_requires_approval_rights_and_valid_audio(monkeypatch) -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+
+        with app.state.testing_session() as session:
+            song_request = session.get(SongRequest, UUID(created["id"]))
+            track_id = str(song_request.track_id)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            not_approved = await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": track_id,
+                    "rights_confirmed": "true",
+                    "rights_note": "허가 확인",
+                },
+                files={"file": ("song.mp3", b"invalid", "audio/mpeg")},
+            )
+            await approve_request(admin, admin_csrf, created["id"])
+            no_rights = await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": track_id,
+                    "rights_confirmed": "false",
+                    "rights_note": "확인 안 됨",
+                },
+                files={"file": ("song.mp3", b"invalid", "audio/mpeg")},
+            )
+            bad_extension = await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": track_id,
+                    "rights_confirmed": "true",
+                    "rights_note": "허가 확인",
+                },
+                files={"file": ("song.exe", b"invalid", "application/octet-stream")},
+            )
+            monkeypatch.setenv("MAX_MEDIA_SIZE_MB", "0")
+            too_large = await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": track_id,
+                    "rights_confirmed": "true",
+                    "rights_note": "허가 확인",
+                },
+                files={"file": ("song.mp3", b"x", "audio/mpeg")},
+            )
+            monkeypatch.setenv("MAX_MEDIA_SIZE_MB", "50")
+            invalid_audio = await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": track_id,
+                    "rights_confirmed": "true",
+                    "rights_note": "허가 확인",
+                },
+                files={"file": ("song.mp3", b"not-really-an-mp3", "audio/mpeg")},
+            )
+            return not_approved, no_rights, bad_extension, too_large, invalid_audio
+
+    not_approved, no_rights, bad_extension, too_large, invalid_audio = run(scenario())
+    assert not_approved.status_code == 409
+    assert no_rights.status_code == 422
+    assert bad_extension.status_code == 422
+    assert too_large.status_code == 413
+    assert invalid_audio.status_code == 422
+
+
+def test_media_upload_requires_admin_and_csrf() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+            student_upload = await student.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": student_csrf},
+                data={
+                    "track_id": created["id"],
+                    "rights_confirmed": "true",
+                    "rights_note": "허가 확인",
+                },
+                files={"file": ("song.mp3", b"invalid", "audio/mpeg")},
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            no_csrf = await admin.post(
+                "/api/media/upload",
+                data={
+                    "track_id": created["id"],
+                    "rights_confirmed": "true",
+                    "rights_note": "허가 확인",
+                },
+                files={"file": ("song.mp3", b"invalid", "audio/mpeg")},
+            )
+        return student_upload, no_csrf
+
+    student_upload, no_csrf = run(scenario())
+    assert student_upload.status_code == 403
     assert no_csrf.status_code == 403
 
 
