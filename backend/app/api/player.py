@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -11,10 +11,22 @@ from backend.app.auth_dependencies import (
 )
 from backend.app.database import get_db
 from backend.app.models import ControlAuditLog
-from backend.app.services.player import player
+from backend.app.services.player import PlayerError, player
 
 
 router = APIRouter(prefix="/api/player", tags=["player"])
+
+
+def run_player_command(command, *args):
+    try:
+        return command(*args)
+    except PlayerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="오디오 재생 서버에 연결할 수 없습니다.",
+        ) from exc
+
+
 class PlayerAction(StrEnum):
     PLAY = "play"
     PAUSE = "pause"
@@ -36,7 +48,24 @@ class MuteRequest(BaseModel):
 
 @router.get("/status")
 async def read_status(user: CurrentUser):
-    return player.status()
+    return run_player_command(player.status)
+
+
+@router.get("/health")
+async def player_health(user: CurrentUser):
+    try:
+        current = player.status()
+        return {
+            "backend": player.backend_name,
+            "connected": True,
+            "connection": current["connection"],
+        }
+    except PlayerError:
+        return {
+            "backend": player.backend_name,
+            "connected": False,
+            "connection": "offline",
+        }
 
 
 @router.post("/control")
@@ -51,7 +80,7 @@ async def control_player(
         PlayerAction.STOP: player.stop,
         PlayerAction.NEXT: player.next,
     }
-    result = actions[request.action]()
+    result = run_player_command(actions[request.action])
     db.add(
         ControlAuditLog(
             admin_id=user.id,
@@ -69,7 +98,7 @@ async def update_volume(
     user: AdminUserWithCsrf,
     db: Session = Depends(get_db),
 ):
-    result = player.set_volume(request.volume)
+    result = run_player_command(player.set_volume, request.volume)
     db.add(
         ControlAuditLog(
             admin_id=user.id,
@@ -87,7 +116,7 @@ async def update_mute(
     user: AdminUserWithCsrf,
     db: Session = Depends(get_db),
 ):
-    result = player.set_muted(request.muted)
+    result = run_player_command(player.set_muted, request.muted)
     db.add(
         ControlAuditLog(
             admin_id=user.id,

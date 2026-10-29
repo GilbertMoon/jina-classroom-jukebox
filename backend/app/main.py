@@ -19,6 +19,7 @@ from backend.app.api.tracks import router as tracks_router
 from backend.app.auth_dependencies import require_admin, require_student
 from backend.app.models import User
 from backend.app.services.scheduler import start_schedule_service, stop_schedule_service
+from backend.app.services.player import player
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -26,6 +27,7 @@ APP_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    player.configure_from_env()
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
     if scheduler_enabled:
         start_schedule_service()

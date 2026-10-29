@@ -2,7 +2,7 @@
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
-현재 단계는 **STEP 09: 시간대별 자동 재생 스케줄**입니다. 실제 음악 재생 대신 안전하게 연습할 수 있는 모의 플레이어를 사용합니다.
+현재 단계는 **STEP 10: Ubuntu MPD 실제 재생 연결**입니다. 개발 환경에서는 모의 플레이어를 유지하고 강의실 서버에서 MPD를 선택할 수 있습니다.
 
 ## 지금 구현된 기능
 
@@ -38,6 +38,10 @@
 - 스케줄 겹침과 교차 자정 시간대 차단
 - 서버 재시작 후 현재 시간대 자동 합류와 종료 시 자동 정지
 - 재생 시작·종료 이력과 스케줄 변경 감사 로그
+- 환경변수로 FakePlayer와 MPD 재생기 전환
+- MPD 곡 목록 적재·재생·일시정지·정지·다음 곡·볼륨·음소거
+- MPD 연결 상태 표시와 연결 실패 `503` 처리
+- MPD 음악 폴더 밖의 파일 경로 차단과 스케줄 실패 기록
 - pytest 자동 테스트
 - GitHub Actions 자동 테스트
 
@@ -60,10 +64,13 @@ jina-classroom-jukebox/
 │   ├── app/services/media.py   # 오디오 파일 구조·재생 시간 검사
 │   ├── app/services/player.py  # 메모리에서 동작하는 FakePlayer
 │   ├── app/services/scheduler.py # 현재 시간 검사와 자동 재생 실행
+│   ├── app/services/mpd_player.py # Ubuntu MPD 연결 어댑터
 │   ├── app/templates/          # 관리자 HTML 화면
 │   ├── app/static/             # 화면 CSS와 JavaScript
 │   └── tests/test_main.py      # 서버와 플레이어를 확인하는 자동 테스트
 ├── migrations/                 # 데이터베이스 구조 변경 이력
+├── deploy/mpd.conf.example     # localhost 전용 MPD 설정 예시
+├── docs/ubuntu-mpd-setup.md    # Ubuntu 장비 연결 순서
 ├── scripts/seed_demo.py        # 개발용 예시 데이터 생성
 ├── alembic.ini                 # Alembic 설정
 ├── .env.example                # 환경변수 작성 예시(비밀값 없음)
@@ -108,7 +115,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`37 passed`가 표시되면 서버, 로그인, 역할별 권한, 신청·음원·플레이리스트·스케줄과 모의 플레이어 API가 정상이라는 뜻입니다.
+`41 passed`가 표시되면 서버, 로그인, 신청·음원·플레이리스트·스케줄과 Fake/MPD 재생 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
@@ -145,6 +152,11 @@ Copy-Item .env.example .env
 - `MAX_MEDIA_SIZE_MB`: 음원 파일 하나의 최대 크기(MB, 기본 50)
 - `SCHEDULER_ENABLED`: 자동 스케줄 실행 여부(`true` 또는 `false`)
 - `SCHEDULER_INTERVAL_SECONDS`: 현재 시간 확인 간격(기본 30초, 최소 5초)
+- `PLAYER_BACKEND`: 개발용 `fake` 또는 실제 장비용 `mpd`
+- `MPD_HOST`, `MPD_PORT`: MPD 연결 주소와 포트
+- `MPD_PASSWORD`: MPD에 비밀번호를 설정한 경우에만 입력
+- `MPD_TIMEOUT_SECONDS`: 연결·음악 DB 갱신 제한 시간
+- `MPD_MUSIC_ROOT`: MPD의 `music_directory`와 같은 절대 경로
 
 ## PostgreSQL 데이터베이스 준비
 
@@ -260,6 +272,18 @@ python -m scripts.seed_demo
 
 스케줄은 알람시계와 비슷합니다. 데이터베이스에는 “언제 무엇을 틀지”를 저장하고, APScheduler는 주기적으로 시계를 보며 시작과 종료 명령을 실행합니다. 같은 앱을 여러 프로세스로 실행하면 명령이 중복될 수 있으므로 현재 단계에서는 Uvicorn 작업자 1개로 실행합니다.
 
+## STEP 10이 동작하는 순서
+
+1. 서버 시작 시 `PLAYER_BACKEND`를 읽습니다.
+2. `fake`이면 메모리 속 모의 플레이어, `mpd`이면 Ubuntu의 MPD에 연결합니다.
+3. 스케줄이 시작되면 DB의 플레이리스트 파일 경로를 MPD 음악 폴더 기준 상대 경로로 변환합니다.
+4. MPD 음악 데이터베이스를 갱신하고 곡 순서대로 대기열에 넣습니다.
+5. 기존 플레이어 API가 MPD의 재생·정지·다음 곡·볼륨을 제어합니다.
+6. 대시보드는 5초마다 상태를 읽어 `MPD Online` 또는 `MPD Offline`을 표시합니다.
+7. 연결 실패 시 제어 API는 `503`, 자동 스케줄은 `FAILED` 재생 이력을 남깁니다.
+
+애플리케이션은 리모컨이고 MPD는 실제 오디오 장치를 다루는 재생기라고 생각하면 쉽습니다. [`Ubuntu MPD 연결 안내`](docs/ubuntu-mpd-setup.md)를 따라 장비를 준비하세요. `MEDIA_ROOT`와 `MPD_MUSIC_ROOT`는 반드시 같은 폴더를 가리켜야 합니다.
+
 `GET /health/live`는 웹 프로세스가 살아 있는지만 확인합니다. `GET /health/ready`는 PostgreSQL 연결까지 성공해야 `200`을 반환합니다. DB가 연결되지 않으면 안전하게 `503`을 반환합니다.
 
 GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마이그레이션과 예시 데이터 생성을 실제 PostgreSQL에서도 자동 검증합니다.
@@ -273,4 +297,4 @@ GitHub Actions에서는 별도의 PostgreSQL 18.6 서비스를 실행하여 마�
 
 ## 다음 단계
 
-STEP 10에서는 Ubuntu MPD 서버와 연결하여 모의 플레이어를 실제 로컬 오디오 재생기로 교체합니다.
+STEP 11에서는 서버·MPD·오디오 장치 장애 상태와 운영 기록을 한 화면에서 확인하도록 개선합니다.

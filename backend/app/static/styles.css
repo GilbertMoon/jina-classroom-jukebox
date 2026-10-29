@@ -90,6 +90,17 @@ body {
   padding: 0.65rem 0.9rem;
 }
 
+.connection-pill.is-offline {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #fecaca;
+}
+
+.connection-pill.is-offline .status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0.8rem rgba(239, 68, 68, 0.75);
+}
+
 .status-dot {
   background: #57ee9b;
   border-radius: 50%;

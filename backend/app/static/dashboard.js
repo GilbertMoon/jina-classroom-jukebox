@@ -40,6 +40,8 @@ const elements = {
   scheduleVolume: document.querySelector("#schedule-volume"),
   scheduleList: document.querySelector("#schedule-list"),
   scheduleRefreshButton: document.querySelector("#schedule-refresh-button"),
+  connectionPill: document.querySelector("#connection-pill"),
+  connectionLabel: document.querySelector("#connection-label"),
 };
 
 let readyTracks = [];
@@ -74,6 +76,15 @@ function render(state) {
   elements.muteButton.setAttribute("aria-pressed", String(state.muted));
   elements.muteButton.classList.toggle("btn-info", state.muted);
   elements.muteButton.classList.toggle("btn-outline-info", !state.muted);
+  elements.connectionPill.classList.remove("is-offline");
+  elements.connectionLabel.textContent = state.backend === "mpd" ? "MPD Online" : "Demo Player Online";
+}
+
+function renderConnectionHealth(health) {
+  elements.connectionPill.classList.toggle("is-offline", !health.connected);
+  elements.connectionLabel.textContent = health.connected
+    ? `${health.backend === "mpd" ? "MPD" : "Demo Player"} Online`
+    : `${health.backend.toUpperCase()} Offline`;
 }
 
 function showError(error) {
@@ -556,7 +567,21 @@ elements.logoutButton.addEventListener("click", async () => {
 
 elements.reviewRefreshButton.addEventListener("click", loadReviewList);
 
-request("/api/player/status").then(render).catch(showError);
+async function refreshPlayer() {
+  try {
+    render(await request("/api/player/status"));
+  } catch (error) {
+    showError(error);
+  }
+  try {
+    renderConnectionHealth(await request("/api/player/health"));
+  } catch (error) {
+    showError(error);
+  }
+}
+
+refreshPlayer();
+window.setInterval(refreshPlayer, 5000);
 loadReviewList();
 loadPlaylistBuilder();
 loadSchedules();

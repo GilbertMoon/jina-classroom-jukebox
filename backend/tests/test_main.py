@@ -31,6 +31,11 @@ from backend.app.models import (
 from backend.app.models.entities import MediaStatus, RequestStatus, UserRole
 from backend.app.security import hash_password
 from backend.app.services.media import MediaInspection
+from backend.app.services.mpd_player import MpdPlayer, MpdSettings
+from backend.app.services.player import (
+    PlayerConfigurationError,
+    Track as PlayerTrack,
+)
 from backend.app.services.scheduler import schedule_runner
 
 
@@ -77,9 +82,11 @@ def isolated_database(tmp_path, monkeypatch) -> Generator[None, None, None]:
 
     app.dependency_overrides[get_db] = override_get_db
     app.state.testing_session = testing_session
+    player.use_fake()
     player.reset()
     schedule_runner.reset()
     yield
+    player.use_fake()
     app.dependency_overrides.clear()
     del app.state.testing_session
     Base.metadata.drop_all(engine)
@@ -925,6 +932,190 @@ def test_schedule_writes_require_admin_and_csrf() -> None:
     student_create, no_csrf = run(scenario())
     assert student_create.status_code == 403
     assert no_csrf.status_code == 403
+
+
+class FakeMpdClient:
+    def __init__(self, state: dict, fail_connect: bool = False) -> None:
+        self.state = state
+        self.fail_connect = fail_connect
+        self.timeout = None
+        self.idletimeout = None
+
+    def connect(self, host, port):
+        if self.fail_connect:
+            raise OSError("offline")
+        self.state["connected_to"] = (host, port)
+
+    def password(self, password):
+        self.state["password"] = password
+
+    def close(self):
+        pass
+
+    def disconnect(self):
+        pass
+
+    def update(self):
+        self.state["updated"] = True
+
+    def clear(self):
+        self.state["playlist"] = []
+        self.state["song"] = 0
+
+    def add(self, uri):
+        self.state.setdefault("playlist", []).append(uri)
+
+    def play(self):
+        self.state["state"] = "play"
+
+    def pause(self, value):
+        self.state["state"] = "pause" if value else "play"
+
+    def stop(self):
+        self.state["state"] = "stop"
+
+    def next(self):
+        playlist = self.state.get("playlist", [])
+        if playlist:
+            self.state["song"] = (self.state.get("song", 0) + 1) % len(playlist)
+
+    def setvol(self, volume):
+        self.state["volume"] = int(volume)
+
+    def status(self):
+        return {
+            "state": self.state.get("state", "stop"),
+            "song": str(self.state.get("song", 0)),
+            "elapsed": "12.7",
+            "duration": "180.0",
+            "volume": str(self.state.get("volume", 30)),
+        }
+
+    def playlistinfo(self):
+        return [
+            {
+                "file": uri,
+                "title": Path(uri).stem,
+                "artist": "MPD Artist",
+                "duration": "180.0",
+                "pos": str(index),
+                "id": str(index + 1),
+            }
+            for index, uri in enumerate(self.state.get("playlist", []))
+        ]
+
+    def currentsong(self):
+        playlist = self.playlistinfo()
+        return playlist[self.state.get("song", 0)] if playlist else {}
+
+
+def test_mpd_player_loads_local_files_and_translates_status(tmp_path) -> None:
+    music_root = tmp_path / "music"
+    music_root.mkdir()
+    first_path = music_root / "first.mp3"
+    second_path = music_root / "nested" / "second.ogg"
+    second_path.parent.mkdir()
+    first_path.touch()
+    second_path.touch()
+    state = {"playlist": [], "state": "stop", "song": 0, "volume": 30}
+    mpd_player = MpdPlayer(
+        MpdSettings("127.0.0.1", 6600, None, 1, music_root),
+        client_factory=lambda: FakeMpdClient(state),
+    )
+
+    mpd_player.load_playlist(
+        [
+            PlayerTrack("1", "First", "Artist", 180, str(first_path)),
+            PlayerTrack("2", "Second", "Artist", 180, str(second_path)),
+        ]
+    )
+    mpd_player.set_volume(42)
+    playing = mpd_player.play()
+    mpd_player.next()
+    paused = mpd_player.pause()
+
+    assert state["connected_to"] == ("127.0.0.1", 6600)
+    assert state["playlist"] == ["first.mp3", "nested/second.ogg"]
+    assert playing["playback_state"] == "playing"
+    assert playing["volume"] == 42
+    assert paused["playback_state"] == "paused"
+    assert paused["current_track"]["title"] == "second"
+    assert paused["backend"] == "mpd"
+
+
+def test_mpd_player_rejects_media_outside_music_root(tmp_path) -> None:
+    music_root = tmp_path / "music"
+    music_root.mkdir()
+    outside = tmp_path / "outside.mp3"
+    state = {"playlist": []}
+    mpd_player = MpdPlayer(
+        MpdSettings("127.0.0.1", 6600, None, 1, music_root),
+        client_factory=lambda: FakeMpdClient(state),
+    )
+
+    with pytest.raises(PlayerConfigurationError):
+        mpd_player.load_playlist(
+            [PlayerTrack("1", "Outside", "Artist", 180, str(outside))]
+        )
+
+
+def test_mpd_connection_failure_is_reported_as_service_unavailable(tmp_path) -> None:
+    mpd_player = MpdPlayer(
+        MpdSettings("127.0.0.1", 6600, None, 1, tmp_path),
+        client_factory=lambda: FakeMpdClient({}, fail_connect=True),
+    )
+    player.use_backend(mpd_player, "mpd")
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            await login(student, "student@example.com", "student-password")
+            status_response = await student.get("/api/player/status")
+            health_response = await student.get("/api/player/health")
+            return status_response, health_response
+
+    status_response, health_response = run(scenario())
+    assert status_response.status_code == 503
+    assert health_response.status_code == 200
+    assert health_response.json() == {
+        "backend": "mpd",
+        "connected": False,
+        "connection": "offline",
+    }
+
+
+def test_schedule_records_mpd_failure_only_once_per_time_slot() -> None:
+    playlist_id = add_active_playlist("Offline MPD Mix")
+    with app.state.testing_session() as session:
+        session.add(
+            Schedule(
+                name="Offline Slot",
+                weekdays=[0],
+                start_time=datetime.strptime("08:00", "%H:%M").time(),
+                end_time=datetime.strptime("09:00", "%H:%M").time(),
+                timezone="Asia/Seoul",
+                playlist_id=playlist_id,
+                volume=25,
+                is_enabled=True,
+            )
+        )
+        session.commit()
+
+    mpd_player = MpdPlayer(
+        MpdSettings("127.0.0.1", 6600, None, 1, Path("media").resolve()),
+        client_factory=lambda: FakeMpdClient({}, fail_connect=True),
+    )
+    player.use_backend(mpd_player, "mpd")
+    now = datetime(2026, 10, 26, 8, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+    with app.state.testing_session() as session:
+        schedule_runner.evaluate(now, session)
+    with app.state.testing_session() as session:
+        schedule_runner.evaluate(now, session)
+    with app.state.testing_session() as session:
+        events = session.scalars(select(PlaybackEvent)).all()
+        assert len(events) == 1
+        assert events[0].result == "FAILED"
+        assert events[0].error_code == "PlayerConnectionError"
 
 
 def test_admin_control_requires_csrf_and_creates_audit_log() -> None:

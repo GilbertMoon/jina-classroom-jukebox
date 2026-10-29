@@ -1,0 +1,25 @@
+# Copy the relevant values into /etc/mpd.conf on the Ubuntu classroom server.
+# Keep MPD bound to localhost; the FastAPI application is the remote control layer.
+
+music_directory         "/srv/ax2-jukebox/media"
+playlist_directory      "/var/lib/mpd/playlists"
+db_file                 "/var/lib/mpd/tag_cache"
+log_file                "/var/log/mpd/mpd.log"
+pid_file                "/run/mpd/pid"
+state_file              "/var/lib/mpd/state"
+sticker_file            "/var/lib/mpd/sticker_file"
+
+user                    "mpd"
+group                   "audio"
+bind_to_address         "127.0.0.1"
+port                    "6600"
+
+auto_update             "yes"
+restore_paused          "yes"
+
+audio_output {
+    type                "alsa"
+    name                "Classroom amplifier"
+    device              "default"
+    mixer_type          "software"
+}

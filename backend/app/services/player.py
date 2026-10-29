@@ -1,6 +1,7 @@
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Any, Iterable
+import os
+from typing import Any, Iterable, Protocol
 
 
 class PlaybackState(StrEnum):
@@ -15,6 +16,30 @@ class Track:
     title: str
     artist: str
     duration_seconds: int
+    media_path: str | None = None
+
+
+class PlayerError(RuntimeError):
+    """Base error for player backends that cannot complete a command."""
+
+
+class PlayerConnectionError(PlayerError):
+    """Raised when the configured player service is unavailable."""
+
+
+class PlayerConfigurationError(PlayerError):
+    """Raised when player paths or settings are unsafe or invalid."""
+
+
+class PlayerBackend(Protocol):
+    def load_playlist(self, tracks: Iterable[Track]) -> None: ...
+    def status(self) -> dict[str, Any]: ...
+    def play(self) -> dict[str, Any]: ...
+    def pause(self) -> dict[str, Any]: ...
+    def stop(self) -> dict[str, Any]: ...
+    def next(self) -> dict[str, Any]: ...
+    def set_volume(self, volume: int) -> dict[str, Any]: ...
+    def set_muted(self, muted: bool) -> dict[str, Any]: ...
 
 
 class FakePlayer:
@@ -55,6 +80,8 @@ class FakePlayer:
             "volume": self._volume,
             "muted": self._muted,
             "connection": "demo",
+            "backend": "fake",
+            "connected": True,
         }
 
     def play(self) -> dict[str, Any]:
@@ -87,4 +114,66 @@ class FakePlayer:
         return self.status()
 
 
-player = FakePlayer()
+class PlayerManager:
+    """Stable facade that lets the app switch between fake and MPD backends."""
+
+    def __init__(self) -> None:
+        self.use_fake()
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend_name
+
+    def use_fake(self) -> None:
+        self._backend: PlayerBackend = FakePlayer()
+        self._backend_name = "fake"
+
+    def use_backend(self, backend: PlayerBackend, name: str) -> None:
+        self._backend = backend
+        self._backend_name = name
+
+    def configure_from_env(self) -> None:
+        backend_name = os.getenv("PLAYER_BACKEND", "fake").strip().lower()
+        if backend_name == "fake":
+            self.use_fake()
+            return
+        if backend_name == "mpd":
+            from backend.app.services.mpd_player import MpdPlayer
+
+            self.use_backend(MpdPlayer.from_env(), "mpd")
+            return
+        raise PlayerConfigurationError(
+            "PLAYER_BACKEND must be either 'fake' or 'mpd'."
+        )
+
+    def reset(self) -> None:
+        reset = getattr(self._backend, "reset", None)
+        if reset is not None:
+            reset()
+
+    def load_playlist(self, tracks: Iterable[Track]) -> None:
+        self._backend.load_playlist(tracks)
+
+    def status(self) -> dict[str, Any]:
+        return self._backend.status()
+
+    def play(self) -> dict[str, Any]:
+        return self._backend.play()
+
+    def pause(self) -> dict[str, Any]:
+        return self._backend.pause()
+
+    def stop(self) -> dict[str, Any]:
+        return self._backend.stop()
+
+    def next(self) -> dict[str, Any]:
+        return self._backend.next()
+
+    def set_volume(self, volume: int) -> dict[str, Any]:
+        return self._backend.set_volume(volume)
+
+    def set_muted(self, muted: bool) -> dict[str, Any]:
+        return self._backend.set_muted(muted)
+
+
+player = PlayerManager()

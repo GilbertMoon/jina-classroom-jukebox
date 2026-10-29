@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from backend.app.database import SessionLocal
 from backend.app.models import PlaybackEvent, Playlist, PlaylistItem, Schedule
 from backend.app.services.player import Track as PlayerTrack
-from backend.app.services.player import player
+from backend.app.services.player import PlayerError, player
 
 
 class ScheduleRunner:
@@ -45,17 +45,33 @@ class ScheduleRunner:
             ordered_items = sorted(active.playlist.items, key=lambda item: item.position)
             if not ordered_items:
                 return
-            player.load_playlist(
-                PlayerTrack(
-                    id=str(item.track.id),
-                    title=item.track.title,
-                    artist=item.track.artist_or_channel or "가수 미입력",
-                    duration_seconds=item.track.duration_seconds or 0,
+            try:
+                player.load_playlist(
+                    PlayerTrack(
+                        id=str(item.track.id),
+                        title=item.track.title,
+                        artist=item.track.artist_or_channel or "가수 미입력",
+                        duration_seconds=item.track.duration_seconds or 0,
+                        media_path=item.track.media_path,
+                    )
+                    for item in ordered_items
                 )
-                for item in ordered_items
-            )
-            player.set_volume(active.volume)
-            player.play()
+                player.set_volume(active.volume)
+                player.play()
+            except PlayerError as exc:
+                failed_event = PlaybackEvent(
+                    track_id=ordered_items[0].track.id,
+                    schedule_id=active.id,
+                    started_at=now.astimezone(timezone.utc),
+                    ended_at=now.astimezone(timezone.utc),
+                    result="FAILED",
+                    error_code=type(exc).__name__,
+                )
+                db.add(failed_event)
+                db.commit()
+                self.current_schedule_id = active.id
+                self.current_event_id = failed_event.id
+                return
             event = PlaybackEvent(
                 track_id=ordered_items[0].track.id,
                 schedule_id=active.id,
@@ -67,11 +83,22 @@ class ScheduleRunner:
             self.current_schedule_id = active.id
             self.current_event_id = event.id
         elif active is None and self.current_schedule_id is not None:
-            player.stop()
-            self._complete_current_event(now, db)
+            try:
+                player.stop()
+                self._complete_current_event(now, db)
+            except PlayerError as exc:
+                self._complete_current_event(
+                    now, db, result="FAILED", error_code=type(exc).__name__
+                )
             self.reset()
 
-    def _complete_current_event(self, now: datetime, db: Session) -> None:
+    def _complete_current_event(
+        self,
+        now: datetime,
+        db: Session,
+        result: str = "COMPLETED",
+        error_code: str | None = None,
+    ) -> None:
         event = (
             db.get(PlaybackEvent, self.current_event_id)
             if self.current_event_id is not None
@@ -79,7 +106,8 @@ class ScheduleRunner:
         )
         if event is not None and event.ended_at is None:
             event.ended_at = now.astimezone(timezone.utc)
-            event.result = "COMPLETED"
+            event.result = result
+            event.error_code = error_code
             db.commit()
 
     @staticmethod
