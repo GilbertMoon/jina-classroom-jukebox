@@ -41,7 +41,6 @@ const elements = {
   scheduleList: document.querySelector("#schedule-list"),
   scheduleRefreshButton: document.querySelector("#schedule-refresh-button"),
   playerRefreshButton: document.querySelector("#player-refresh-button"),
-  lastUpdated: document.querySelector("#last-updated"),
 };
 
 let readyTracks = [];
@@ -76,14 +75,6 @@ function render(state) {
   elements.muteButton.setAttribute("aria-pressed", String(state.muted));
   elements.muteButton.classList.toggle("btn-info", state.muted);
   elements.muteButton.classList.toggle("btn-outline-info", !state.muted);
-}
-
-function renderLastUpdated() {
-  elements.lastUpdated.textContent = `마지막 확인: ${new Intl.DateTimeFormat("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date())}`;
 }
 
 function showError(error) {
@@ -571,7 +562,6 @@ async function refreshPlayer() {
   elements.playerRefreshButton.textContent = "확인 중…";
   try {
     render(await request("/api/player/status"));
-    renderLastUpdated();
   } catch (error) {
     showError(error);
   } finally {

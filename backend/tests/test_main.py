@@ -213,7 +213,7 @@ def test_admin_can_login_open_dashboard_and_logout() -> None:
     assert "Demo Player Online" not in dashboard.text
     assert 'id="playback-control"' in dashboard.text
     assert 'id="player-refresh-button"' in dashboard.text
-    assert 'id="last-updated"' in dashboard.text
+    assert "마지막 확인:" not in dashboard.text
     assert logout.status_code == 200
     assert after_logout.status_code == 401
 
