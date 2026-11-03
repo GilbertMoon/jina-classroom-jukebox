@@ -152,6 +152,12 @@ def test_health_live() -> None:
     assert response.status_code == 200
 
 
+def test_swagger_docs_are_available() -> None:
+    response = run(get("/docs"))
+    assert response.status_code == 200
+    assert "Swagger UI" in response.text
+
+
 def test_health_ready_when_database_is_available(monkeypatch) -> None:
     monkeypatch.setattr(health, "engine", create_engine("sqlite+pysqlite:///:memory:"))
     assert run(get("/health/ready")).status_code == 200
