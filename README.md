@@ -70,6 +70,7 @@ jina-classroom-jukebox/
 │   └── tests/test_main.py      # 서버와 플레이어를 확인하는 자동 테스트
 ├── migrations/                 # 데이터베이스 구조 변경 이력
 ├── deploy/mpd.conf.example     # localhost 전용 MPD 설정 예시
+├── docs/step-01-verification.md # STEP 01 완료 기준 검증 기록
 ├── docs/ubuntu-mpd-setup.md    # Ubuntu 장비 연결 순서
 ├── scripts/seed_demo.py        # 개발용 예시 데이터 생성
 ├── alembic.ini                 # Alembic 설정
@@ -115,7 +116,7 @@ python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-`41 passed`가 표시되면 서버, 로그인, 신청·음원·플레이리스트·스케줄과 Fake/MPD 재생 API가 정상이라는 뜻입니다.
+`42 passed`가 표시되면 서버, API 문서, 로그인, 신청·음원·플레이리스트·스케줄과 Fake/MPD 재생 API가 정상이라는 뜻입니다.
 
 ### 4. 개발 서버 실행하기
 
