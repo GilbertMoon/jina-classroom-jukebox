@@ -40,8 +40,6 @@ const elements = {
   scheduleVolume: document.querySelector("#schedule-volume"),
   scheduleList: document.querySelector("#schedule-list"),
   scheduleRefreshButton: document.querySelector("#schedule-refresh-button"),
-  connectionPill: document.querySelector("#connection-pill"),
-  connectionLabel: document.querySelector("#connection-label"),
   playerRefreshButton: document.querySelector("#player-refresh-button"),
   lastUpdated: document.querySelector("#last-updated"),
 };
@@ -78,15 +76,6 @@ function render(state) {
   elements.muteButton.setAttribute("aria-pressed", String(state.muted));
   elements.muteButton.classList.toggle("btn-info", state.muted);
   elements.muteButton.classList.toggle("btn-outline-info", !state.muted);
-  elements.connectionPill.classList.remove("is-offline");
-  elements.connectionLabel.textContent = state.backend === "mpd" ? "MPD Online" : "Demo Player Online";
-}
-
-function renderConnectionHealth(health) {
-  elements.connectionPill.classList.toggle("is-offline", !health.connected);
-  elements.connectionLabel.textContent = health.connected
-    ? `${health.backend === "mpd" ? "MPD" : "Demo Player"} Online`
-    : `${health.backend.toUpperCase()} Offline`;
 }
 
 function renderLastUpdated() {
@@ -582,11 +571,8 @@ async function refreshPlayer() {
   elements.playerRefreshButton.textContent = "확인 중…";
   try {
     render(await request("/api/player/status"));
-    renderConnectionHealth(await request("/api/player/health"));
     renderLastUpdated();
   } catch (error) {
-    elements.connectionPill.classList.add("is-offline");
-    elements.connectionLabel.textContent = "연결 확인 실패";
     showError(error);
   } finally {
     elements.playerRefreshButton.disabled = false;

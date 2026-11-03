@@ -23,18 +23,14 @@
           <p class="text-secondary mb-0">교실 음악의 재생 현황과 운영 기능을 한 화면에서 관리합니다.</p>
         </div>
         <div class="d-flex align-items-center gap-2">
-          <div id="connection-pill" class="connection-pill" aria-label="연결 상태">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span id="connection-label">연결 확인 중</span>
-          </div>
           <button id="logout-button" class="btn btn-outline-light" type="button">로그아웃</button>
         </div>
       </header>
 
       <div id="alert" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
 
-      <nav class="dashboard-nav mb-4" aria-label="관리 메뉴 바로가기">
-        <a href="#playback-control">재생 현황</a>
+      <nav id="admin-menu" class="dashboard-nav mb-4" aria-label="관리자 메뉴">
+        <a class="is-active" href="#playback-control" aria-current="page">재생 현황</a>
         <a href="#review-heading">신청곡 승인</a>
         <a href="#playlist-heading">플레이리스트</a>
         <a href="#schedule-heading">자동 스케줄</a>
