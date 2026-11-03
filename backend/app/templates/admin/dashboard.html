@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Jina Classroom Jukebox 모의 관리자 대시보드">
+    <meta name="description" content="Jina Classroom Jukebox 관리자 운영 대시보드">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>관리자 대시보드 · Jina Classroom Jukebox</title>
     <link
@@ -19,8 +19,8 @@
       <header class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
           <p class="eyebrow mb-2">AX2 CLASSROOM</p>
-          <h1 class="display-6 fw-bold mb-1">Jina Jukebox</h1>
-          <p class="text-secondary mb-0">실제 장비 연결 전 사용하는 모의 관리자 플레이어</p>
+          <h1 class="display-6 fw-bold mb-1">관리자 운영 대시보드</h1>
+          <p class="text-secondary mb-0">교실 음악의 재생 현황과 운영 기능을 한 화면에서 관리합니다.</p>
         </div>
         <div class="d-flex align-items-center gap-2">
           <div id="connection-pill" class="connection-pill" aria-label="연결 상태">
@@ -31,9 +31,27 @@
         </div>
       </header>
 
-      <div id="alert" class="alert alert-danger d-none" role="alert"></div>
+      <div id="alert" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
 
-      <section class="player-shell rounded-4 p-3 p-md-4 p-lg-5 shadow-lg">
+      <nav class="dashboard-nav mb-4" aria-label="관리 메뉴 바로가기">
+        <a href="#playback-control">재생 현황</a>
+        <a href="#review-heading">신청곡 승인</a>
+        <a href="#playlist-heading">플레이리스트</a>
+        <a href="#schedule-heading">자동 스케줄</a>
+      </nav>
+
+      <section id="playback-control" class="player-shell rounded-4 p-3 p-md-4 p-lg-5 shadow-lg" aria-labelledby="playback-heading">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+          <div>
+            <p class="card-label mb-1">PLAYBACK CONTROL</p>
+            <h2 id="playback-heading" class="h4 fw-bold mb-1">재생 현황 및 제어</h2>
+            <p class="small text-secondary mb-0">기존 재생 API의 상태를 확인하고 명령을 전달하는 관리자 화면입니다.</p>
+          </div>
+          <div class="text-md-end">
+            <button id="player-refresh-button" class="btn btn-sm btn-outline-light" type="button">상태 새로고침</button>
+            <p id="last-updated" class="small text-secondary mt-2 mb-0" aria-live="polite">마지막 확인: 확인 중…</p>
+          </div>
+        </div>
         <div class="row g-4 align-items-center">
           <div class="col-lg-5">
             <div class="album-art rounded-4" aria-hidden="true">
@@ -46,7 +64,7 @@
               <span id="state-badge" class="badge text-bg-secondary">정지</span>
               <span class="small text-secondary">지금 재생 중</span>
             </div>
-            <h2 id="track-title" class="display-5 fw-bold text-truncate">불러오는 중…</h2>
+            <h3 id="track-title" class="display-5 fw-bold text-truncate">불러오는 중…</h3>
             <p id="track-artist" class="fs-5 text-secondary">잠시만 기다려 주세요.</p>
 
             <div class="progress mb-2" role="progressbar" aria-label="곡 재생 진행률">
@@ -88,9 +106,9 @@
         </div>
         <div class="col-md-6">
           <article class="info-card rounded-4 p-4 h-100">
-            <p class="card-label">운영 안내</p>
-            <h3 class="h5 mb-1">Demo Mode</h3>
-            <p class="text-secondary mb-0">지금은 실제 스피커가 아닌 메모리 속 플레이어를 조작합니다.</p>
+            <p class="card-label">연동 안내</p>
+            <h3 class="h5 mb-1">관리 화면 검증 모드</h3>
+            <p class="text-secondary mb-0">현재 연결된 재생 백엔드의 상태와 제어 결과를 이 화면에서 확인합니다.</p>
           </article>
         </div>
       </section>
