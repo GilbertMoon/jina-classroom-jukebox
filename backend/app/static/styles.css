@@ -109,6 +109,36 @@ body {
   width: 0.55rem;
 }
 
+.dashboard-nav {
+  display: flex;
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+}
+
+.dashboard-nav a {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #e2e8f0;
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  font-weight: 700;
+  padding: 0.55rem 0.85rem;
+  text-decoration: none;
+}
+
+.dashboard-nav a:hover,
+.dashboard-nav a:focus-visible {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+section[id] {
+  scroll-margin-top: 1rem;
+}
+
 .player-shell,
 .info-card {
   backdrop-filter: blur(20px);
@@ -186,5 +216,9 @@ body {
 @media (max-width: 575.98px) {
   .control-btn {
     flex: 1 1 calc(50% - 0.5rem);
+  }
+
+  #player-refresh-button {
+    min-height: 2.75rem;
   }
 }

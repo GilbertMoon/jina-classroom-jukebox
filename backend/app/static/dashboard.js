@@ -42,6 +42,8 @@ const elements = {
   scheduleRefreshButton: document.querySelector("#schedule-refresh-button"),
   connectionPill: document.querySelector("#connection-pill"),
   connectionLabel: document.querySelector("#connection-label"),
+  playerRefreshButton: document.querySelector("#player-refresh-button"),
+  lastUpdated: document.querySelector("#last-updated"),
 };
 
 let readyTracks = [];
@@ -85,6 +87,14 @@ function renderConnectionHealth(health) {
   elements.connectionLabel.textContent = health.connected
     ? `${health.backend === "mpd" ? "MPD" : "Demo Player"} Online`
     : `${health.backend.toUpperCase()} Offline`;
+}
+
+function renderLastUpdated() {
+  elements.lastUpdated.textContent = `마지막 확인: ${new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date())}`;
 }
 
 function showError(error) {
@@ -568,18 +578,23 @@ elements.logoutButton.addEventListener("click", async () => {
 elements.reviewRefreshButton.addEventListener("click", loadReviewList);
 
 async function refreshPlayer() {
+  elements.playerRefreshButton.disabled = true;
+  elements.playerRefreshButton.textContent = "확인 중…";
   try {
     render(await request("/api/player/status"));
-  } catch (error) {
-    showError(error);
-  }
-  try {
     renderConnectionHealth(await request("/api/player/health"));
+    renderLastUpdated();
   } catch (error) {
+    elements.connectionPill.classList.add("is-offline");
+    elements.connectionLabel.textContent = "연결 확인 실패";
     showError(error);
+  } finally {
+    elements.playerRefreshButton.disabled = false;
+    elements.playerRefreshButton.textContent = "상태 새로고침";
   }
 }
 
+elements.playerRefreshButton.addEventListener("click", refreshPlayer);
 refreshPlayer();
 window.setInterval(refreshPlayer, 5000);
 loadReviewList();
