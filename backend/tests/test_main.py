@@ -175,7 +175,7 @@ def test_health_ready_when_database_is_unavailable(monkeypatch) -> None:
 def test_login_page_is_public() -> None:
     response = run(get("/login"))
     assert response.status_code == 200
-    assert "Jina Jukebox 로그인" in response.text
+    assert "AX2 Classroom Jukebox 로그인" in response.text
 
 
 def test_invalid_login_uses_generic_error() -> None:
