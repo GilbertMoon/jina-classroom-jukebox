@@ -17,10 +17,9 @@
       <section class="login-card rounded-4 p-4 p-md-5 shadow-lg mx-auto">
         <p class="eyebrow mb-2">AX2 CLASSROOM</p>
         <h1 class="h2 fw-bold">AX2 Classroom Jukebox 로그인</h1>
-        <p class="text-secondary mb-4">등록된 학생 또는 관리자 계정으로 로그인하세요.</p>
 
         <div id="login-alert" class="alert alert-danger d-none" role="alert"></div>
-        <form id="login-form" novalidate>
+        <form id="login-form" class="mt-4" novalidate>
           <div class="mb-3">
             <label class="form-label" for="email">이메일</label>
             <input class="form-control form-control-lg" id="email" name="email" type="email" autocomplete="username" required>
@@ -31,7 +30,6 @@
           </div>
           <button id="login-button" class="btn btn-primary btn-lg w-100" type="submit">로그인</button>
         </form>
-        <p class="small text-secondary mt-4 mb-0">비밀번호는 서버에서 Argon2 해시로 확인되며 평문으로 저장되지 않습니다.</p>
       </section>
     </main>
     <script src="{{ url_for('static', path='/login.js') }}" defer></script>
