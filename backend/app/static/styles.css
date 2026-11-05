@@ -30,10 +30,11 @@ body {
 }
 
 .login-card h1 {
+  font-size: clamp(1.5rem, 4.5vw, 2rem);
   white-space: nowrap;
 }
 
-@media (max-width: 575.98px) {
+@media (max-width: 419.98px) {
   .login-card h1 {
     white-space: normal;
   }
