@@ -30,14 +30,9 @@ body {
 }
 
 .login-card h1 {
-  font-size: clamp(1.5rem, 4.5vw, 2rem);
+  font-size: clamp(1rem, 5.2vw, 2rem);
+  letter-spacing: -0.03em;
   white-space: nowrap;
-}
-
-@media (max-width: 419.98px) {
-  .login-card h1 {
-    white-space: normal;
-  }
 }
 
 .student-shell {
