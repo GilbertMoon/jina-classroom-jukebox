@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Jina Classroom Jukebox",
+    title="AX2 Classroom Jukebox",
     description="AX2 classroom jukebox API",
     version="0.1.0",
     lifespan=lifespan,
@@ -66,7 +66,7 @@ templates = Jinja2Templates(directory=APP_DIR / "templates")
 @app.get("/", tags=["service"])
 async def read_root() -> dict[str, str]:
     """Return a friendly message for people opening the server in a browser."""
-    return {"message": "Jina Classroom Jukebox is running."}
+    return {"message": "AX2 Classroom Jukebox is running."}
 
 
 @app.get("/health/live", tags=["health"])

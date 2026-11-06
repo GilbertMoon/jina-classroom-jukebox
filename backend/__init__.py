@@ -1,1 +1,1 @@
-"""Backend package for Jina Classroom Jukebox."""
+"""Backend package for AX2 Classroom Jukebox."""
