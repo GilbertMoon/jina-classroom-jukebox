@@ -208,6 +208,12 @@ def test_admin_can_login_open_dashboard_and_logout() -> None:
     me, dashboard, logout, after_logout = run(scenario())
     assert me.json()["role"] == "ADMIN"
     assert dashboard.status_code == 200
+    assert "관리자 운영 대시보드" in dashboard.text
+    assert 'id="admin-menu"' in dashboard.text
+    assert "Demo Player Online" not in dashboard.text
+    assert 'id="playback-control"' in dashboard.text
+    assert 'id="player-refresh-button"' in dashboard.text
+    assert "마지막 확인:" not in dashboard.text
     assert logout.status_code == 200
     assert after_logout.status_code == 401
 

@@ -40,8 +40,7 @@ const elements = {
   scheduleVolume: document.querySelector("#schedule-volume"),
   scheduleList: document.querySelector("#schedule-list"),
   scheduleRefreshButton: document.querySelector("#schedule-refresh-button"),
-  connectionPill: document.querySelector("#connection-pill"),
-  connectionLabel: document.querySelector("#connection-label"),
+  playerRefreshButton: document.querySelector("#player-refresh-button"),
 };
 
 let readyTracks = [];
@@ -76,15 +75,6 @@ function render(state) {
   elements.muteButton.setAttribute("aria-pressed", String(state.muted));
   elements.muteButton.classList.toggle("btn-info", state.muted);
   elements.muteButton.classList.toggle("btn-outline-info", !state.muted);
-  elements.connectionPill.classList.remove("is-offline");
-  elements.connectionLabel.textContent = state.backend === "mpd" ? "MPD Online" : "Demo Player Online";
-}
-
-function renderConnectionHealth(health) {
-  elements.connectionPill.classList.toggle("is-offline", !health.connected);
-  elements.connectionLabel.textContent = health.connected
-    ? `${health.backend === "mpd" ? "MPD" : "Demo Player"} Online`
-    : `${health.backend.toUpperCase()} Offline`;
 }
 
 function showError(error) {
@@ -135,7 +125,7 @@ function renderReviewList(items) {
     article.className = "request-item border rounded-3 p-3";
 
     const header = document.createElement("div");
-    header.className = "d-flex flex-wrap justify-content-between gap-3";
+    header.className = "d-flex flex-wrap justify-content-between align-items-start gap-3";
     const details = document.createElement("div");
     details.append(
       makeText("h3", "h6 fw-bold mb-1", item.title),
@@ -149,7 +139,7 @@ function renderReviewList(items) {
     link.className = "small";
     link.textContent = "YouTube에서 검토";
     details.append(link);
-    const badge = makeText("span", `badge request-status-${item.status.toLowerCase()}`, reviewStatusLabels[item.status] || item.status);
+    const badge = makeText("span", `badge flex-shrink-0 request-status-${item.status.toLowerCase()}`, reviewStatusLabels[item.status] || item.status);
     header.append(details, badge);
     article.append(header);
 
@@ -568,18 +558,19 @@ elements.logoutButton.addEventListener("click", async () => {
 elements.reviewRefreshButton.addEventListener("click", loadReviewList);
 
 async function refreshPlayer() {
+  elements.playerRefreshButton.disabled = true;
+  elements.playerRefreshButton.textContent = "확인 중…";
   try {
     render(await request("/api/player/status"));
   } catch (error) {
     showError(error);
-  }
-  try {
-    renderConnectionHealth(await request("/api/player/health"));
-  } catch (error) {
-    showError(error);
+  } finally {
+    elements.playerRefreshButton.disabled = false;
+    elements.playerRefreshButton.textContent = "상태 새로고침";
   }
 }
 
+elements.playerRefreshButton.addEventListener("click", refreshPlayer);
 refreshPlayer();
 window.setInterval(refreshPlayer, 5000);
 loadReviewList();
