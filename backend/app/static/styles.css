@@ -186,6 +186,12 @@ section[id] {
   white-space: nowrap;
 }
 
+#playlist-add-track {
+  flex-shrink: 0;
+  min-width: 4.5rem;
+  white-space: nowrap;
+}
+
 @media (max-width: 575.98px) {
   .control-btn {
     flex: 1 1 calc(50% - 0.5rem);
