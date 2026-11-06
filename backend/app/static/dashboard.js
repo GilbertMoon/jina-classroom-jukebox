@@ -125,7 +125,7 @@ function renderReviewList(items) {
     article.className = "request-item border rounded-3 p-3";
 
     const header = document.createElement("div");
-    header.className = "d-flex flex-wrap justify-content-between gap-3";
+    header.className = "d-flex flex-wrap justify-content-between align-items-start gap-3";
     const details = document.createElement("div");
     details.append(
       makeText("h3", "h6 fw-bold mb-1", item.title),
@@ -139,7 +139,7 @@ function renderReviewList(items) {
     link.className = "small";
     link.textContent = "YouTube에서 검토";
     details.append(link);
-    const badge = makeText("span", `badge request-status-${item.status.toLowerCase()}`, reviewStatusLabels[item.status] || item.status);
+    const badge = makeText("span", `badge flex-shrink-0 request-status-${item.status.toLowerCase()}`, reviewStatusLabels[item.status] || item.status);
     header.append(details, badge);
     article.append(header);
 
