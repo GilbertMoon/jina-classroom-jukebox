@@ -1,4 +1,4 @@
-# Jina Classroom Jukebox
+# AX2 Classroom Jukebox
 
 강의실에서 정해진 시간에 음악을 자동으로 재생하고, 학생의 신청곡과 관리자의 선곡·재생 제어를 지원하기 위한 학습 프로젝트입니다.
 
