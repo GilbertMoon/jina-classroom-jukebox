@@ -46,6 +46,11 @@ jobs:
       - name: Apply PostgreSQL migrations
         run: python -m alembic upgrade head
 
+      - name: Verify PostgreSQL migration rollback and re-apply
+        run: |
+          python -m alembic downgrade base
+          python -m alembic upgrade head
+
       - name: Seed development data
         run: python -m scripts.seed_demo
 

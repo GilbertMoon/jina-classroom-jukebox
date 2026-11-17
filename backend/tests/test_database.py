@@ -2,7 +2,9 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+import pytest
 from sqlalchemy import create_engine, func, inspect, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.models import Base, Track, User
@@ -52,6 +54,46 @@ def test_demo_seed_is_repeatable() -> None:
 
         assert session.scalar(select(func.count()).select_from(User)) == 2
         assert session.scalar(select(func.count()).select_from(Track)) == 1
+
+
+def test_database_rejects_negative_track_duration() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            Track(
+                title="Invalid Track",
+                duration_seconds=-1,
+                media_status=MediaStatus.NOT_AVAILABLE,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_data_survives_database_engine_restart(tmp_path: Path) -> None:
+    database_path = tmp_path / "restart-test.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    first_engine = create_engine(database_url)
+    Base.metadata.create_all(first_engine)
+
+    with Session(first_engine) as session:
+        session.add(
+            Track(
+                title="Persistent Track",
+                media_status=MediaStatus.NOT_AVAILABLE,
+            )
+        )
+        session.commit()
+    first_engine.dispose()
+
+    restarted_engine = create_engine(database_url)
+    with Session(restarted_engine) as session:
+        assert session.scalar(
+            select(Track).where(Track.title == "Persistent Track")
+        )
+    restarted_engine.dispose()
 
 
 def test_initial_migration_upgrades_and_downgrades(
