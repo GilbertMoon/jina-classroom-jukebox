@@ -9,6 +9,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -65,6 +66,16 @@ class User(Base):
 
 class Track(Base):
     __tablename__ = "tracks"
+    __table_args__ = (
+        CheckConstraint(
+            "duration_seconds IS NULL OR duration_seconds >= 0",
+            name="duration_seconds_non_negative",
+        ),
+        CheckConstraint(
+            "media_size_bytes IS NULL OR media_size_bytes >= 0",
+            name="media_size_bytes_non_negative",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     youtube_video_id: Mapped[str | None] = mapped_column(String(20), unique=True)
@@ -136,7 +147,10 @@ class Playlist(Base):
 
 class PlaylistItem(Base):
     __tablename__ = "playlist_items"
-    __table_args__ = (UniqueConstraint("playlist_id", "position"),)
+    __table_args__ = (
+        UniqueConstraint("playlist_id", "position"),
+        CheckConstraint("position >= 1", name="position_positive"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     playlist_id: Mapped[UUID] = mapped_column(ForeignKey("playlists.id"))
@@ -149,6 +163,10 @@ class PlaylistItem(Base):
 
 class Schedule(Base):
     __tablename__ = "schedules"
+    __table_args__ = (
+        CheckConstraint("volume >= 0 AND volume <= 100", name="volume_range"),
+        CheckConstraint("start_time < end_time", name="time_range"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(200))
@@ -165,6 +183,12 @@ class Schedule(Base):
 
 class PlaybackEvent(Base):
     __tablename__ = "playback_events"
+    __table_args__ = (
+        CheckConstraint(
+            "ended_at IS NULL OR ended_at >= started_at",
+            name="time_order",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     track_id: Mapped[UUID | None] = mapped_column(ForeignKey("tracks.id"))

@@ -71,6 +71,7 @@ jina-classroom-jukebox/
 ├── migrations/                 # 데이터베이스 구조 변경 이력
 ├── deploy/mpd.conf.example     # localhost 전용 MPD 설정 예시
 ├── docs/step-01-verification.md # STEP 01 완료 기준 검증 기록
+├── docs/step-03-database.md     # PostgreSQL·Alembic 초보자 안내
 ├── docs/ubuntu-mpd-setup.md    # Ubuntu 장비 연결 순서
 ├── scripts/seed_demo.py        # 개발용 예시 데이터 생성
 ├── alembic.ini                 # Alembic 설정
@@ -160,6 +161,9 @@ Copy-Item .env.example .env
 - `MPD_MUSIC_ROOT`: MPD의 `music_directory`와 같은 절대 경로
 
 ## PostgreSQL 데이터베이스 준비
+
+처음 접하는 경우 [`STEP 03 PostgreSQL·Alembic 안내`](docs/step-03-database.md)를
+먼저 읽으면 데이터베이스, 모델과 마이그레이션의 역할을 순서대로 이해할 수 있습니다.
 
 먼저 PostgreSQL에 `jukebox` 데이터베이스와 전용 사용자를 준비합니다. 실제 비밀번호는 `.env`의 `DATABASE_URL`에만 작성하고 GitHub에는 올리지 않습니다.
 
