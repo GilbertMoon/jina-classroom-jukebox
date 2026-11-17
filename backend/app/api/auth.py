@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from backend.app.auth_dependencies import CurrentUser, DatabaseSession, UserWithCsrf
 from backend.app.models import User
 from backend.app.security import new_csrf_token, verify_password
+from backend.app.services.login_security import login_attempt_limiter
 
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
@@ -30,6 +31,15 @@ def user_response(user: User) -> UserResponse:
 
 @router.post("/login")
 async def login(request: Request, credentials: LoginRequest, db: DatabaseSession):
+    attempt_key = login_attempt_limiter.key(request, credentials.email)
+    retry_after = login_attempt_limiter.retry_after(attempt_key)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = db.scalar(
         select(User).where(func.lower(User.email) == credentials.email.strip().lower())
     )
@@ -38,11 +48,13 @@ async def login(request: Request, credentials: LoginRequest, db: DatabaseSession
     if user is None or not user.is_active or not verify_password(
         credentials.password, user.password_hash
     ):
+        login_attempt_limiter.record_failure(attempt_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="이메일 또는 비밀번호가 올바르지 않습니다.",
         )
 
+    login_attempt_limiter.record_success(attempt_key)
     csrf_token = new_csrf_token()
     request.session.clear()
     request.session.update({"user_id": str(user.id), "csrf_token": csrf_token})
