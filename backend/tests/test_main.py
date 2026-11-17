@@ -181,6 +181,50 @@ def test_login_page_is_public() -> None:
     assert "AX2 Classroom Jukebox 로그인" in response.text
 
 
+def test_student_registration_requires_admin_approval() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            registered = await client.post(
+                "/api/auth/register",
+                json={"name": "New Student", "email": "new@example.com", "password": "new-password"},
+            )
+            before_approval = await client.post(
+                "/api/auth/login",
+                json={"email": "new@example.com", "password": "new-password"},
+            )
+            admin_csrf = await login(client, "admin@example.com", "admin-password")
+            pending = await client.get("/api/users/pending")
+            approved = await client.post(
+                f"/api/users/{pending.json()[0]['id']}/approve",
+                headers={"X-CSRF-Token": admin_csrf},
+            )
+            await client.post("/api/auth/logout", headers={"X-CSRF-Token": admin_csrf})
+            after_approval = await client.post(
+                "/api/auth/login",
+                json={"email": "new@example.com", "password": "new-password"},
+            )
+            return registered, before_approval, pending, approved, after_approval
+
+    registered, before, pending, approved, after = run(scenario())
+    assert registered.status_code == 201
+    assert before.status_code == 401
+    assert pending.status_code == 200
+    assert pending.json()[0]["email"] == "new@example.com"
+    assert approved.status_code == 200
+    assert after.status_code == 200
+
+
+def test_student_cannot_view_pending_registrations() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await login(client, "student@example.com", "student-password")
+            return await client.get("/api/users/pending")
+
+    assert run(scenario()).status_code == 403
+
+
 def test_invalid_login_uses_generic_error() -> None:
     async def scenario():
         transport = ASGITransport(app=app)

@@ -6,7 +6,8 @@ from sqlalchemy import func, select
 
 from backend.app.auth_dependencies import CurrentUser, DatabaseSession, UserWithCsrf
 from backend.app.models import User
-from backend.app.security import new_csrf_token, verify_password
+from backend.app.models.entities import UserRole
+from backend.app.security import hash_password, new_csrf_token, verify_password
 from backend.app.services.login_security import login_attempt_limiter
 
 
@@ -15,6 +16,12 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class RegisterRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: str = Field(min_length=5, max_length=320)
     password: str = Field(min_length=8, max_length=256)
 
 
@@ -27,6 +34,26 @@ class UserResponse(BaseModel):
 
 def user_response(user: User) -> UserResponse:
     return UserResponse(id=user.id, name=user.name, email=user.email, role=user.role)
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(credentials: RegisterRequest, db: DatabaseSession):
+    email = credentials.email.strip().lower()
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise HTTPException(status_code=422, detail="올바른 이메일 주소를 입력해 주세요.")
+    if db.scalar(select(User.id).where(func.lower(User.email) == email)) is not None:
+        raise HTTPException(status_code=409, detail="이미 등록된 이메일입니다.")
+
+    user = User(
+        name=credentials.name.strip(),
+        email=email,
+        password_hash=hash_password(credentials.password),
+        role=UserRole.STUDENT,
+        is_active=False,
+    )
+    db.add(user)
+    db.commit()
+    return {"message": "가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다."}
 
 
 @router.post("/login")

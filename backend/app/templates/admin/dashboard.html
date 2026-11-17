@@ -31,6 +31,7 @@
 
       <nav id="admin-menu" class="dashboard-nav mb-4" aria-label="관리자 메뉴">
         <a class="is-active" href="#playback-control" aria-current="page">재생 현황</a>
+        <a href="#user-approval-heading">가입 승인</a>
         <a href="#review-heading">신청곡 승인</a>
         <a href="#playlist-heading">플레이리스트</a>
         <a href="#schedule-heading">자동 스케줄</a>
@@ -106,6 +107,18 @@
             <p class="text-secondary mb-0">현재 연결된 재생 백엔드의 상태와 제어 결과를 이 화면에서 확인합니다.</p>
           </article>
         </div>
+      </section>
+
+      <section class="info-card rounded-4 p-4 mt-4" aria-labelledby="user-approval-heading">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <div>
+            <p class="card-label mb-1">STUDENT ACCOUNTS</p>
+            <h2 id="user-approval-heading" class="h4 fw-bold mb-0">학생 가입 승인</h2>
+          </div>
+          <button id="user-refresh-button" class="btn btn-sm btn-outline-light" type="button">새로고침</button>
+        </div>
+        <p class="small text-secondary">승인된 학생만 로그인하여 신청곡 기능을 사용할 수 있습니다.</p>
+        <div id="pending-user-list" class="request-list" aria-live="polite"></div>
       </section>
 
       <section class="info-card rounded-4 p-4 mt-4" aria-labelledby="review-heading">

@@ -16,6 +16,7 @@ from backend.app.api.playlists import router as playlists_router
 from backend.app.api.song_requests import router as song_requests_router
 from backend.app.api.schedules import router as schedules_router
 from backend.app.api.tracks import router as tracks_router
+from backend.app.api.users import router as users_router
 from backend.app.auth_dependencies import require_admin, require_student
 from backend.app.models import User
 from backend.app.services.scheduler import start_schedule_service, stop_schedule_service
@@ -58,6 +59,7 @@ app.include_router(playlists_router)
 app.include_router(song_requests_router)
 app.include_router(schedules_router)
 app.include_router(tracks_router)
+app.include_router(users_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 templates = Jinja2Templates(directory=APP_DIR / "templates")
@@ -90,6 +92,11 @@ async def admin_dashboard(
 @app.get("/login", response_class=HTMLResponse, tags=["authentication"])
 async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "login.html")
+
+
+@app.get("/register", response_class=HTMLResponse, tags=["authentication"])
+async def register_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "register.html")
 
 
 @app.get("/student", response_class=HTMLResponse, tags=["student"])
