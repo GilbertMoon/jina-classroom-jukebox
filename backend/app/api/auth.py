@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 
 from backend.app.auth_dependencies import CurrentUser, DatabaseSession, UserWithCsrf
@@ -21,7 +21,7 @@ class LoginRequest(BaseModel):
 
 class RegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=100)
-    email: str = Field(min_length=5, max_length=320)
+    email: EmailStr
     password: str = Field(min_length=8, max_length=256)
 
 
@@ -38,9 +38,7 @@ def user_response(user: User) -> UserResponse:
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(credentials: RegisterRequest, db: DatabaseSession):
-    email = credentials.email.strip().lower()
-    if "@" not in email or email.startswith("@") or email.endswith("@"):
-        raise HTTPException(status_code=422, detail="올바른 이메일 주소를 입력해 주세요.")
+    email = str(credentials.email).lower()
     if db.scalar(select(User.id).where(func.lower(User.email) == email)) is not None:
         raise HTTPException(status_code=409, detail="이미 등록된 이메일입니다.")
 
