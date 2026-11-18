@@ -170,7 +170,13 @@ function renderReviewList(items) {
     details.append(
       makeText("h3", "h6 fw-bold mb-1", item.title),
       makeText("p", "small text-secondary mb-1", item.artist_or_channel || "가수·채널 미입력"),
-      makeText("p", "small mb-2", `신청자: ${item.requester_name} (${item.requester_email})`),
+      makeText(
+        "p",
+        "small mb-2",
+        item.request_count > 1
+          ? `신청자 ${item.request_count}명: ${item.requesters.map((requester) => requester.name).join(", ")}`
+          : `신청자: ${item.requester_name} (${item.requester_email})`,
+      ),
     );
     const link = document.createElement("a");
     link.href = item.youtube_url;

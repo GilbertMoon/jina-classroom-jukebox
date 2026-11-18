@@ -9,6 +9,7 @@ from backend.app.models.entities import (
     SystemSetting,
     Track,
     User,
+    WishListItem,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "SystemSetting",
     "Track",
     "User",
+    "WishListItem",
 ]

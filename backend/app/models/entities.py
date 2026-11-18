@@ -128,6 +128,23 @@ class SongRequest(Base):
     reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by])
 
 
+class WishListItem(Base):
+    __tablename__ = "wish_list_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "track_id", name="uq_wish_list_user_track"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    track_id: Mapped[UUID] = mapped_column(ForeignKey("tracks.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+
+    owner: Mapped[User] = relationship()
+    track: Mapped[Track] = relationship()
+
+
 class Playlist(Base):
     __tablename__ = "playlists"
 
