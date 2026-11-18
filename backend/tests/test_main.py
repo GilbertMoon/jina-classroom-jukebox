@@ -31,6 +31,7 @@ from backend.app.models import (
 from backend.app.models.entities import MediaStatus, RequestStatus, UserRole
 from backend.app.security import hash_password
 from backend.app.services.media import MediaInspection
+from backend.app.services.login_security import login_attempt_limiter
 from backend.app.services.mpd_player import MpdPlayer, MpdSettings
 from backend.app.services.player import (
     PlayerConfigurationError,
@@ -85,8 +86,10 @@ def isolated_database(tmp_path, monkeypatch) -> Generator[None, None, None]:
     player.use_fake()
     player.reset()
     schedule_runner.reset()
+    login_attempt_limiter.reset()
     yield
     player.use_fake()
+    login_attempt_limiter.reset()
     app.dependency_overrides.clear()
     del app.state.testing_session
     Base.metadata.drop_all(engine)
@@ -178,6 +181,50 @@ def test_login_page_is_public() -> None:
     assert "AX2 Classroom Jukebox 로그인" in response.text
 
 
+def test_student_registration_requires_admin_approval() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            registered = await client.post(
+                "/api/auth/register",
+                json={"name": "New Student", "email": "new@example.com", "password": "new-password"},
+            )
+            before_approval = await client.post(
+                "/api/auth/login",
+                json={"email": "new@example.com", "password": "new-password"},
+            )
+            admin_csrf = await login(client, "admin@example.com", "admin-password")
+            pending = await client.get("/api/users/pending")
+            approved = await client.post(
+                f"/api/users/{pending.json()[0]['id']}/approve",
+                headers={"X-CSRF-Token": admin_csrf},
+            )
+            await client.post("/api/auth/logout", headers={"X-CSRF-Token": admin_csrf})
+            after_approval = await client.post(
+                "/api/auth/login",
+                json={"email": "new@example.com", "password": "new-password"},
+            )
+            return registered, before_approval, pending, approved, after_approval
+
+    registered, before, pending, approved, after = run(scenario())
+    assert registered.status_code == 201
+    assert before.status_code == 401
+    assert pending.status_code == 200
+    assert pending.json()[0]["email"] == "new@example.com"
+    assert approved.status_code == 200
+    assert after.status_code == 200
+
+
+def test_student_cannot_view_pending_registrations() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await login(client, "student@example.com", "student-password")
+            return await client.get("/api/users/pending")
+
+    assert run(scenario()).status_code == 403
+
+
 def test_invalid_login_uses_generic_error() -> None:
     async def scenario():
         transport = ASGITransport(app=app)
@@ -185,6 +232,57 @@ def test_invalid_login_uses_generic_error() -> None:
             return await client.post(
                 "/api/auth/login",
                 json={"email": "missing@example.com", "password": "wrong-password"},
+            )
+
+    response = run(scenario())
+    assert response.status_code == 401
+    assert response.json()["detail"] == "이메일 또는 비밀번호가 올바르지 않습니다."
+
+
+def test_repeated_login_failures_are_rate_limited(monkeypatch) -> None:
+    monkeypatch.setenv("LOGIN_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("LOGIN_WINDOW_SECONDS", "60")
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            responses = []
+            for _ in range(3):
+                responses.append(
+                    await client.post(
+                        "/api/auth/login",
+                        json={
+                            "email": "student@example.com",
+                            "password": "wrong-password",
+                        },
+                    )
+                )
+            return responses
+
+    first, second, blocked = run(scenario())
+    assert first.status_code == 401
+    assert second.status_code == 401
+    assert blocked.status_code == 429
+    assert blocked.headers["Retry-After"]
+
+
+def test_inactive_user_cannot_login() -> None:
+    with app.state.testing_session() as session:
+        student = session.scalar(
+            select(User).where(User.email == "student@example.com")
+        )
+        student.is_active = False
+        session.commit()
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post(
+                "/api/auth/login",
+                json={
+                    "email": "student@example.com",
+                    "password": "student-password",
+                },
             )
 
     response = run(scenario())
@@ -238,6 +336,23 @@ def test_student_can_read_status_but_cannot_control_player() -> None:
     current_status, control = run(scenario())
     assert current_status.status_code == 200
     assert control.status_code == 403
+
+
+def test_role_specific_dashboards_reject_the_other_role() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            await login(student, "student@example.com", "student-password")
+            student_to_admin = await student.get("/admin")
+
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            admin_to_student = await admin.get("/student")
+        return student_to_admin, admin_to_student
+
+    student_to_admin, admin_to_student = run(scenario())
+    assert student_to_admin.status_code == 403
+    assert admin_to_student.status_code == 403
 
 
 def test_student_can_open_dashboard_create_and_list_own_request() -> None:

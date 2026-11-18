@@ -20,6 +20,8 @@ const elements = {
   volumeValue: document.querySelector("#volume-value"),
   muteButton: document.querySelector("#mute-button"),
   logoutButton: document.querySelector("#logout-button"),
+  pendingUserList: document.querySelector("#pending-user-list"),
+  userRefreshButton: document.querySelector("#user-refresh-button"),
   reviewList: document.querySelector("#review-list"),
   reviewRefreshButton: document.querySelector("#review-refresh-button"),
   playlistCreateForm: document.querySelector("#playlist-create-form"),
@@ -112,6 +114,44 @@ function makeText(tagName, className, text) {
   element.className = className;
   element.textContent = text;
   return element;
+}
+
+function renderPendingUsers(users) {
+  if (!users.length) {
+    elements.pendingUserList.innerHTML = '<p class="text-secondary mb-0">승인 대기 중인 학생이 없습니다.</p>';
+    return;
+  }
+  elements.pendingUserList.replaceChildren(...users.map((user) => {
+    const article = document.createElement("article");
+    article.className = "request-item border rounded-3 p-3 d-flex flex-wrap justify-content-between align-items-center gap-3";
+    const details = document.createElement("div");
+    details.append(
+      makeText("h3", "h6 fw-bold mb-1", user.name),
+      makeText("p", "small text-secondary mb-0", user.email),
+    );
+    const approve = makeText("button", "btn btn-sm btn-success", "가입 승인");
+    approve.type = "button";
+    approve.addEventListener("click", async () => {
+      approve.disabled = true;
+      try {
+        await request(`/api/users/${user.id}/approve`, { method: "POST" });
+        await loadPendingUsers();
+      } catch (error) {
+        showError(error);
+        approve.disabled = false;
+      }
+    });
+    article.append(details, approve);
+    return article;
+  }));
+}
+
+async function loadPendingUsers() {
+  try {
+    renderPendingUsers(await request("/api/users/pending"));
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function renderReviewList(items) {
@@ -556,6 +596,7 @@ elements.logoutButton.addEventListener("click", async () => {
 });
 
 elements.reviewRefreshButton.addEventListener("click", loadReviewList);
+elements.userRefreshButton.addEventListener("click", loadPendingUsers);
 
 async function refreshPlayer() {
   elements.playerRefreshButton.disabled = true;
@@ -574,5 +615,6 @@ elements.playerRefreshButton.addEventListener("click", refreshPlayer);
 refreshPlayer();
 window.setInterval(refreshPlayer, 5000);
 loadReviewList();
+loadPendingUsers();
 loadPlaylistBuilder();
 loadSchedules();

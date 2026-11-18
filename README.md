@@ -72,6 +72,7 @@ jina-classroom-jukebox/
 ├── deploy/mpd.conf.example     # localhost 전용 MPD 설정 예시
 ├── docs/step-01-verification.md # STEP 01 완료 기준 검증 기록
 ├── docs/step-03-database.md     # PostgreSQL·Alembic 초보자 안내
+├── docs/step-04-auth-verification.md # 로그인·권한 검증 안내
 ├── docs/ubuntu-mpd-setup.md    # Ubuntu 장비 연결 순서
 ├── scripts/seed_demo.py        # 개발용 예시 데이터 생성
 ├── alembic.ini                 # Alembic 설정
@@ -205,6 +206,8 @@ python -m scripts.seed_demo
 비밀번호 원문은 데이터베이스에 저장하지 않습니다. Argon2로 만든 해시만 저장하므로, 데이터베이스를 보더라도 원래 비밀번호가 그대로 노출되지 않습니다.
 
 ## STEP 04가 동작하는 순서
+
+자세한 보안 원리와 확인 항목은 [`STEP 04 로그인·권한 검증 안내`](docs/step-04-auth-verification.md)에서 확인할 수 있습니다.
 
 1. 사용자가 이메일과 비밀번호를 입력합니다.
 2. 서버가 저장된 Argon2 해시와 비밀번호를 비교합니다.
