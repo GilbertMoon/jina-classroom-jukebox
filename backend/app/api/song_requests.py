@@ -55,6 +55,16 @@ class RequesterSummary(BaseModel):
     status: RequestStatus
 
 
+class CommunitySongRequestResponse(BaseModel):
+    track_id: UUID
+    youtube_url: str
+    title: str
+    artist_or_channel: str | None
+    status: RequestStatus
+    request_count: int
+    requested_by_me: bool
+
+
 class AdminSongRequestResponse(SongRequestResponse):
     track_id: UUID
     media_status: MediaStatus
@@ -191,6 +201,65 @@ async def list_my_song_requests(user: StudentUser, db: DatabaseSession):
         .order_by(SongRequest.created_at.desc())
     ).all()
     return [response_from_model(item) for item in requests]
+
+
+@router.get("/community", response_model=list[CommunitySongRequestResponse])
+async def list_community_song_requests(user: StudentUser, db: DatabaseSession):
+    requests = db.scalars(
+        select(SongRequest)
+        .options(selectinload(SongRequest.track))
+        .where(SongRequest.status != RequestStatus.REJECTED)
+        .order_by(SongRequest.created_at.desc())
+    ).all()
+    grouped: dict[UUID, list[SongRequest]] = {}
+    for item in requests:
+        grouped.setdefault(item.track_id, []).append(item)
+
+    responses = []
+    for group in grouped.values():
+        representative = next(
+            (item for item in group if item.status == RequestStatus.PENDING),
+            group[0],
+        )
+        responses.append(
+            CommunitySongRequestResponse(
+                track_id=representative.track_id,
+                youtube_url=representative.track.source_url or "",
+                title=representative.track.title,
+                artist_or_channel=representative.track.artist_or_channel,
+                status=representative.status,
+                request_count=len(group),
+                requested_by_me=any(item.user_id == user.id for item in group),
+            )
+        )
+    return responses
+
+
+@router.post(
+    "/tracks/{track_id}/join",
+    response_model=SongRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def join_community_song_request(
+    track_id: UUID, user: StudentUserWithCsrf, db: DatabaseSession
+):
+    track = db.get(Track, track_id)
+    pending_exists = db.scalar(
+        select(SongRequest.id).where(
+            SongRequest.track_id == track_id,
+            SongRequest.status == RequestStatus.PENDING,
+        )
+    )
+    if track is None or pending_exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="승인 대기 중인 신청곡만 함께 신청할 수 있습니다.",
+        )
+    song_request = create_or_resubmit_request(db, user.id, track)
+    db.commit()
+    db.refresh(song_request)
+    song_request.track = track
+    return response_from_model(song_request)
 
 
 @router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)

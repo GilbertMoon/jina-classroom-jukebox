@@ -5,6 +5,7 @@ const alertBox = document.querySelector("#student-alert");
 const submitButton = document.querySelector("#request-button");
 const wishButton = document.querySelector("#wish-button");
 const wishList = document.querySelector("#wish-list");
+const communityList = document.querySelector("#community-list");
 const youtubeUrlInput = document.querySelector("#youtube-url");
 const titleInput = document.querySelector("#title");
 const artistInput = document.querySelector("#artist");
@@ -89,7 +90,7 @@ function renderRequests(items) {
         try {
           await apiRequest(`/api/requests/${item.id}`, { method: "DELETE" });
           showMessage("신청을 취소했습니다.", "success");
-          await loadRequests();
+          await Promise.all([loadRequests(), loadCommunityRequests()]);
         } catch (error) {
           showMessage(error.message);
         }
@@ -138,6 +139,45 @@ function renderWishList(items) {
   }));
 }
 
+function renderCommunityList(items) {
+  if (!items.length) {
+    communityList.innerHTML = '<p class="text-secondary mb-0">현재 공개할 신청곡이 없습니다.</p>';
+    return;
+  }
+  communityList.replaceChildren(...items.map((item) => {
+    const article = document.createElement("article");
+    article.className = "request-item border rounded-3 p-3 d-flex flex-wrap justify-content-between align-items-center gap-3";
+    const details = document.createElement("div");
+    const heading = document.createElement("h3");
+    heading.className = "h6 fw-bold mb-1";
+    heading.textContent = item.title;
+    const summary = document.createElement("p");
+    summary.className = "small text-secondary mb-0";
+    summary.textContent = `${item.artist_or_channel || "가수·채널 미입력"} · ${statusLabels[item.status]} · ${item.request_count}명 신청`;
+    details.append(heading, summary);
+    const join = document.createElement("button");
+    join.type = "button";
+    join.className = "btn btn-sm btn-outline-info";
+    join.disabled = item.requested_by_me || item.status !== "PENDING";
+    join.textContent = item.requested_by_me
+      ? "신청 참여 중"
+      : item.status === "PENDING" ? "나도 듣고 싶어요" : "승인 완료";
+    join.addEventListener("click", async () => {
+      join.disabled = true;
+      try {
+        await apiRequest(`/api/requests/tracks/${item.track_id}/join`, { method: "POST" });
+        showMessage("기존 신청곡에 함께 신청했습니다.", "success");
+        await Promise.all([loadCommunityRequests(), loadRequests()]);
+      } catch (error) {
+        showMessage(error.message);
+        join.disabled = false;
+      }
+    });
+    article.append(details, join);
+    return article;
+  }));
+}
+
 async function loadRequests() {
   try {
     renderRequests(await apiRequest("/api/requests/me"));
@@ -149,6 +189,14 @@ async function loadRequests() {
 async function loadWishList() {
   try {
     renderWishList(await apiRequest("/api/wishlist/me"));
+  } catch (error) {
+    showMessage(error.message);
+  }
+}
+
+async function loadCommunityRequests() {
+  try {
+    renderCommunityList(await apiRequest("/api/requests/community"));
   } catch (error) {
     showMessage(error.message);
   }
@@ -178,6 +226,7 @@ form.addEventListener("submit", async (event) => {
     form.reset();
     showMessage("신청곡이 승인 대기 상태로 등록되었습니다.", "success");
     await loadRequests();
+    await loadCommunityRequests();
   } catch (error) {
     showMessage(error.message);
   } finally {
@@ -209,7 +258,7 @@ async function convertWish(item) {
   try {
     await apiRequest(`/api/wishlist/${item.id}/request`, { method: "POST" });
     showMessage("신청곡으로 전환했습니다. Wish List에서는 제거됩니다.", "success");
-    await Promise.all([loadWishList(), loadRequests()]);
+    await Promise.all([loadWishList(), loadRequests(), loadCommunityRequests()]);
   } catch (error) {
     showMessage(error.message);
   }
@@ -228,6 +277,7 @@ async function deleteWish(item) {
 
 document.querySelector("#refresh-button").addEventListener("click", loadRequests);
 document.querySelector("#wish-refresh-button").addEventListener("click", loadWishList);
+document.querySelector("#community-refresh-button").addEventListener("click", loadCommunityRequests);
 document.querySelector("#logout-button").addEventListener("click", async () => {
   try {
     await apiRequest("/api/auth/logout", { method: "POST" });
@@ -239,3 +289,4 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
 
 loadRequests();
 loadWishList();
+loadCommunityRequests();

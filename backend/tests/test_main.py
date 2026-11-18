@@ -498,6 +498,37 @@ def test_same_track_requests_are_grouped_and_one_student_can_cancel() -> None:
     assert grouped_after.json()[0]["request_count"] == 1
 
 
+def test_student_can_join_community_request_without_exposing_students() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as first:
+            csrf = await login(first, "student@example.com", "student-password")
+            await create_student_request(first, csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as second:
+            csrf = await login(second, "another@example.com", "another-password")
+            before = await second.get("/api/requests/community")
+            joined = await second.post(
+                f"/api/requests/tracks/{before.json()[0]['track_id']}/join",
+                headers={"X-CSRF-Token": csrf},
+            )
+            after = await second.get("/api/requests/community")
+            repeated = await second.post(
+                f"/api/requests/tracks/{before.json()[0]['track_id']}/join",
+                headers={"X-CSRF-Token": csrf},
+            )
+            return before, joined, after, repeated
+
+    before, joined, after, repeated = run(scenario())
+    assert before.status_code == 200
+    assert before.json()[0]["requested_by_me"] is False
+    assert "requesters" not in before.json()[0]
+    assert "requester_email" not in before.json()[0]
+    assert joined.status_code == 201
+    assert after.json()[0]["request_count"] == 2
+    assert after.json()[0]["requested_by_me"] is True
+    assert repeated.status_code == 409
+
+
 def test_admin_review_applies_to_all_pending_requests_for_same_track() -> None:
     async def scenario():
         transport = ASGITransport(app=app)
