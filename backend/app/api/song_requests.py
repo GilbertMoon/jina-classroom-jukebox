@@ -49,12 +49,20 @@ class SongRequestResponse(BaseModel):
     created_at: datetime
 
 
+class RequesterSummary(BaseModel):
+    name: str
+    email: str
+    status: RequestStatus
+
+
 class AdminSongRequestResponse(SongRequestResponse):
     track_id: UUID
     media_status: MediaStatus
     media_original_filename: str | None
     requester_name: str
     requester_email: str
+    request_count: int
+    requesters: list[RequesterSummary]
     reviewed_at: datetime | None
 
 
@@ -83,8 +91,12 @@ def response_from_model(song_request: SongRequest) -> SongRequestResponse:
     )
 
 
-def admin_response_from_model(song_request: SongRequest) -> AdminSongRequestResponse:
+def admin_response_from_model(
+    song_request: SongRequest,
+    grouped_requests: list[SongRequest] | None = None,
+) -> AdminSongRequestResponse:
     basic = response_from_model(song_request)
+    group = grouped_requests or [song_request]
     return AdminSongRequestResponse(
         **basic.model_dump(),
         track_id=song_request.track.id,
@@ -92,6 +104,15 @@ def admin_response_from_model(song_request: SongRequest) -> AdminSongRequestResp
         media_original_filename=song_request.track.media_original_filename,
         requester_name=song_request.requester.name,
         requester_email=song_request.requester.email,
+        request_count=len(group),
+        requesters=[
+            RequesterSummary(
+                name=item.requester.name,
+                email=item.requester.email,
+                status=item.status,
+            )
+            for item in group
+        ],
         reviewed_at=song_request.reviewed_at,
     )
 
@@ -203,7 +224,18 @@ async def list_all_song_requests(user: AdminUser, db: DatabaseSession):
         )
         .order_by(SongRequest.created_at.desc())
     ).all()
-    return [admin_response_from_model(item) for item in requests]
+    grouped: dict[UUID, list[SongRequest]] = {}
+    for item in requests:
+        grouped.setdefault(item.track_id, []).append(item)
+
+    responses = []
+    for group in grouped.values():
+        representative = next(
+            (item for item in group if item.status == RequestStatus.PENDING),
+            group[0],
+        )
+        responses.append(admin_response_from_model(representative, group))
+    return responses
 
 
 @router.post("/{request_id}/review", response_model=AdminSongRequestResponse)
@@ -224,7 +256,21 @@ async def review_song_request(
     )
     if song_request is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="신청곡을 찾을 수 없습니다.")
-    if song_request.status != RequestStatus.PENDING:
+    pending_requests = list(
+        db.scalars(
+            select(SongRequest)
+            .options(
+                selectinload(SongRequest.track),
+                selectinload(SongRequest.requester),
+            )
+            .where(
+                SongRequest.track_id == song_request.track_id,
+                SongRequest.status == RequestStatus.PENDING,
+            )
+            .with_for_update()
+        )
+    )
+    if not pending_requests:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="이미 검토가 끝난 신청곡입니다.",
@@ -237,26 +283,31 @@ async def review_song_request(
             detail="반려할 때는 사유를 입력해 주세요.",
         )
 
-    if payload.decision == ReviewDecision.APPROVE:
-        song_request.status = RequestStatus.APPROVED
-        song_request.reject_reason = None
-        song_request.track.media_status = MediaStatus.PENDING_ACQUISITION
-    else:
-        song_request.status = RequestStatus.REJECTED
-        song_request.reject_reason = reject_reason
+    reviewed_at = utc_now()
+    for pending_request in pending_requests:
+        if payload.decision == ReviewDecision.APPROVE:
+            pending_request.status = RequestStatus.APPROVED
+            pending_request.reject_reason = None
+            pending_request.track.media_status = MediaStatus.PENDING_ACQUISITION
+        else:
+            pending_request.status = RequestStatus.REJECTED
+            pending_request.reject_reason = reject_reason
+        pending_request.reviewed_by = user.id
+        pending_request.reviewed_at = reviewed_at
 
-    song_request.reviewed_by = user.id
-    song_request.reviewed_at = utc_now()
     db.add(
         ControlAuditLog(
             admin_id=user.id,
             action=f"request.{payload.decision.value.lower()}",
             payload={
-                "request_id": str(song_request.id),
-                "reject_reason": song_request.reject_reason,
+                "request_id": str(pending_requests[0].id),
+                "request_ids": [str(item.id) for item in pending_requests],
+                "track_id": str(song_request.track_id),
+                "reject_reason": reject_reason or None,
             },
         )
     )
     db.commit()
-    db.refresh(song_request)
-    return admin_response_from_model(song_request)
+    for pending_request in pending_requests:
+        db.refresh(pending_request)
+    return admin_response_from_model(pending_requests[0], pending_requests)

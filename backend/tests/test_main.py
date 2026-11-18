@@ -463,6 +463,67 @@ def test_student_can_cancel_only_own_pending_request() -> None:
     assert remaining.json() == []
 
 
+def test_same_track_requests_are_grouped_and_one_student_can_cancel() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as first:
+            first_csrf = await login(first, "student@example.com", "student-password")
+            first_request = await create_student_request(first, first_csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as second:
+            second_csrf = await login(second, "another@example.com", "another-password")
+            second_request = await create_student_request(second, second_csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            grouped_before = await admin.get("/api/requests")
+        async with AsyncClient(transport=transport, base_url="http://test") as first:
+            first_csrf = await login(first, "student@example.com", "student-password")
+            cancelled = await first.delete(
+                f"/api/requests/{first_request['id']}",
+                headers={"X-CSRF-Token": first_csrf},
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            await login(admin, "admin@example.com", "admin-password")
+            grouped_after = await admin.get("/api/requests")
+        return second_request, grouped_before, cancelled, grouped_after
+
+    second_request, grouped_before, cancelled, grouped_after = run(scenario())
+    assert second_request["status"] == "PENDING"
+    assert len(grouped_before.json()) == 1
+    assert grouped_before.json()[0]["request_count"] == 2
+    assert {item["email"] for item in grouped_before.json()[0]["requesters"]} == {
+        "student@example.com",
+        "another@example.com",
+    }
+    assert cancelled.status_code == 204
+    assert grouped_after.json()[0]["request_count"] == 1
+
+
+def test_admin_review_applies_to_all_pending_requests_for_same_track() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as first:
+            csrf = await login(first, "student@example.com", "student-password")
+            await create_student_request(first, csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as second:
+            csrf = await login(second, "another@example.com", "another-password")
+            await create_student_request(second, csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            csrf = await login(admin, "admin@example.com", "admin-password")
+            grouped = await admin.get("/api/requests")
+            return await admin.post(
+                f"/api/requests/{grouped.json()[0]['id']}/review",
+                headers={"X-CSRF-Token": csrf},
+                json={"decision": "APPROVE"},
+            )
+
+    response = run(scenario())
+    assert response.status_code == 200
+    assert response.json()["request_count"] == 2
+    with app.state.testing_session() as session:
+        statuses = list(session.scalars(select(SongRequest.status)))
+        assert statuses == [RequestStatus.APPROVED, RequestStatus.APPROVED]
+
+
 def test_approved_request_cannot_be_cancelled() -> None:
     async def scenario():
         transport = ASGITransport(app=app)
