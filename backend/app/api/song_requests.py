@@ -96,6 +96,38 @@ def admin_response_from_model(song_request: SongRequest) -> AdminSongRequestResp
     )
 
 
+def create_or_resubmit_request(
+    db, user_id: UUID, track: Track, comment: str | None = None
+) -> SongRequest:
+    existing = db.scalar(
+        select(SongRequest).where(
+            SongRequest.user_id == user_id,
+            SongRequest.track_id == track.id,
+        )
+    )
+    if existing is not None and existing.status != RequestStatus.REJECTED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="승인 대기 중이거나 이미 승인된 YouTube 영상입니다.",
+        )
+    cleaned_comment = (comment or "").strip() or None
+    if existing is not None:
+        existing.status = RequestStatus.PENDING
+        existing.comment = cleaned_comment
+        existing.reject_reason = None
+        existing.reviewed_by = None
+        existing.reviewed_at = None
+        existing.created_at = utc_now()
+        return existing
+    song_request = SongRequest(
+        user_id=user_id,
+        track_id=track.id,
+        comment=cleaned_comment,
+    )
+    db.add(song_request)
+    return song_request
+
+
 @router.post("", response_model=SongRequestResponse, status_code=status.HTTP_201_CREATED)
 async def create_song_request(
     payload: CreateSongRequest,
@@ -120,24 +152,9 @@ async def create_song_request(
         db.add(track)
         db.flush()
 
-    duplicate = db.scalar(
-        select(SongRequest).where(
-            SongRequest.user_id == user.id,
-            SongRequest.track_id == track.id,
-        )
+    song_request = create_or_resubmit_request(
+        db, user.id, track, payload.comment
     )
-    if duplicate is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="이미 신청한 YouTube 영상입니다.",
-        )
-
-    song_request = SongRequest(
-        user_id=user.id,
-        track_id=track.id,
-        comment=(payload.comment or "").strip() or None,
-    )
-    db.add(song_request)
     db.commit()
     db.refresh(song_request)
     song_request.track = track
@@ -153,6 +170,27 @@ async def list_my_song_requests(user: StudentUser, db: DatabaseSession):
         .order_by(SongRequest.created_at.desc())
     ).all()
     return [response_from_model(item) for item in requests]
+
+
+@router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_song_request(
+    request_id: UUID, user: StudentUserWithCsrf, db: DatabaseSession
+):
+    song_request = db.scalar(
+        select(SongRequest).where(
+            SongRequest.id == request_id,
+            SongRequest.user_id == user.id,
+        )
+    )
+    if song_request is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="신청곡을 찾을 수 없습니다.")
+    if song_request.status != RequestStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="승인 대기 중인 신청곡만 취소할 수 있습니다.",
+        )
+    db.delete(song_request)
+    db.commit()
 
 
 @router.get("", response_model=list[AdminSongRequestResponse])

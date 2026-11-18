@@ -436,6 +436,124 @@ def test_duplicate_request_is_rejected_and_other_student_has_private_list() -> N
     assert other_list.json() == []
 
 
+def test_student_can_cancel_only_own_pending_request() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as other:
+            other_csrf = await login(other, "another@example.com", "another-password")
+            forbidden = await other.delete(
+                f"/api/requests/{created['id']}",
+                headers={"X-CSRF-Token": other_csrf},
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            csrf = await login(student, "student@example.com", "student-password")
+            cancelled = await student.delete(
+                f"/api/requests/{created['id']}",
+                headers={"X-CSRF-Token": csrf},
+            )
+            remaining = await student.get("/api/requests/me")
+        return forbidden, cancelled, remaining
+
+    forbidden, cancelled, remaining = run(scenario())
+    assert forbidden.status_code == 404
+    assert cancelled.status_code == 204
+    assert remaining.json() == []
+
+
+def test_approved_request_cannot_be_cancelled() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            await approve_request(admin, admin_csrf, created["id"])
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            return await student.delete(
+                f"/api/requests/{created['id']}",
+                headers={"X-CSRF-Token": student_csrf},
+            )
+
+    assert run(scenario()).status_code == 409
+
+
+def test_rejected_request_can_be_resubmitted() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            created = await create_student_request(student, student_csrf)
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            await admin.post(
+                f"/api/requests/{created['id']}/review",
+                headers={"X-CSRF-Token": admin_csrf},
+                json={"decision": "REJECT", "reject_reason": "다른 버전을 신청해 주세요."},
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            resubmitted = await student.post(
+                "/api/requests",
+                headers={"X-CSRF-Token": student_csrf},
+                json={
+                    "youtube_url": "https://youtu.be/dQw4w9WgXcQ",
+                    "title": "Test Song",
+                    "comment": "다시 검토해 주세요.",
+                },
+            )
+            return resubmitted
+
+    response = run(scenario())
+    assert response.status_code == 201
+    assert response.json()["status"] == "PENDING"
+    assert response.json()["reject_reason"] is None
+
+
+def test_wish_list_is_private_and_converts_to_request() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            csrf = await login(student, "student@example.com", "student-password")
+            created = await student.post(
+                "/api/wishlist",
+                headers={"X-CSRF-Token": csrf},
+                json={
+                    "youtube_url": "https://youtu.be/dQw4w9WgXcQ",
+                    "title": "Wish Song",
+                    "artist_or_channel": "Wish Artist",
+                },
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as other:
+            other_csrf = await login(other, "another@example.com", "another-password")
+            other_list = await other.get("/api/wishlist/me")
+            other_delete = await other.delete(
+                f"/api/wishlist/{created.json()['id']}",
+                headers={"X-CSRF-Token": other_csrf},
+            )
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            csrf = await login(student, "student@example.com", "student-password")
+            converted = await student.post(
+                f"/api/wishlist/{created.json()['id']}/request",
+                headers={"X-CSRF-Token": csrf},
+            )
+            wish_list = await student.get("/api/wishlist/me")
+            requests = await student.get("/api/requests/me")
+        return created, other_list, other_delete, converted, wish_list, requests
+
+    created, other_list, other_delete, converted, wish_list, requests = run(scenario())
+    assert created.status_code == 201
+    assert other_list.json() == []
+    assert other_delete.status_code == 404
+    assert converted.status_code == 200
+    assert wish_list.json() == []
+    assert requests.json()[0]["title"] == "Wish Song"
+
+
 def test_song_request_requires_student_role_and_csrf() -> None:
     async def scenario():
         transport = ASGITransport(app=app)

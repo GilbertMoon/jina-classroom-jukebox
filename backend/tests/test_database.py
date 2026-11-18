@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "system_settings",
     "tracks",
     "users",
+    "wish_list_items",
 }
 
 
