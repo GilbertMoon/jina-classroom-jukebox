@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.app.auth_dependencies import AdminUserWithCsrf, DatabaseSession
+from backend.app.auth_dependencies import AdminUser, AdminUserWithCsrf, DatabaseSession
 from backend.app.config import get_max_media_size_bytes, get_media_root
 from backend.app.models import ControlAuditLog, SongRequest, Track
 from backend.app.models.entities import MediaStatus, RequestStatus
@@ -29,6 +29,44 @@ class MediaUploadResponse(BaseModel):
     size_bytes: int
     duration_seconds: int
     sha256: str
+
+
+class MediaLibraryItem(BaseModel):
+    track_id: UUID
+    title: str
+    artist_or_channel: str | None
+    status: MediaStatus
+    original_filename: str | None
+    content_type: str | None
+    size_bytes: int | None
+    duration_seconds: int | None
+    rights_status: str | None
+    rights_note: str | None
+
+
+@router.get("", response_model=list[MediaLibraryItem])
+async def list_media_library(user: AdminUser, db: DatabaseSession):
+    """Return every track that has entered the local-media workflow."""
+    tracks = db.scalars(
+        select(Track)
+        .where(Track.media_status != MediaStatus.NOT_AVAILABLE)
+        .order_by(Track.created_at.desc())
+    ).all()
+    return [
+        MediaLibraryItem(
+            track_id=track.id,
+            title=track.title,
+            artist_or_channel=track.artist_or_channel,
+            status=track.media_status,
+            original_filename=track.media_original_filename,
+            content_type=track.media_content_type,
+            size_bytes=track.media_size_bytes,
+            duration_seconds=track.duration_seconds,
+            rights_status=track.rights_status,
+            rights_note=track.rights_note,
+        )
+        for track in tracks
+    ]
 
 
 def safe_original_filename(filename: str | None) -> str:
