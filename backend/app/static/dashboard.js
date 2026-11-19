@@ -24,6 +24,8 @@ const elements = {
   userRefreshButton: document.querySelector("#user-refresh-button"),
   reviewList: document.querySelector("#review-list"),
   reviewRefreshButton: document.querySelector("#review-refresh-button"),
+  mediaLibraryList: document.querySelector("#media-library-list"),
+  mediaRefreshButton: document.querySelector("#media-refresh-button"),
   playlistCreateForm: document.querySelector("#playlist-create-form"),
   playlistName: document.querySelector("#playlist-name"),
   playlistDescription: document.querySelector("#playlist-description"),
@@ -259,7 +261,7 @@ function createMediaUploadForm(item) {
     body.append("file", file.files[0]);
     try {
       await request("/api/media/upload", { method: "POST", body });
-      await loadReviewList();
+      await Promise.all([loadReviewList(), loadMediaLibrary(), loadPlaylistBuilder()]);
     } catch (error) {
       showError(error);
     } finally {
@@ -277,6 +279,44 @@ async function loadReviewList() {
   }
 }
 
+function formatBytes(bytes) {
+  if (bytes === null || bytes === undefined) return "파일 미등록";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function loadMediaLibrary() {
+  try {
+    const items = await request("/api/media");
+    if (!items.length) {
+      elements.mediaLibraryList.replaceChildren(makeText("p", "text-secondary mb-0", "아직 관리 중인 음원이 없습니다."));
+      return;
+    }
+    elements.mediaLibraryList.replaceChildren(...items.map((item) => {
+      const article = document.createElement("article");
+      article.className = "request-item border rounded-3 p-3";
+      const header = document.createElement("div");
+      header.className = "d-flex flex-wrap justify-content-between align-items-start gap-2";
+      const details = document.createElement("div");
+      details.append(
+        makeText("h3", "h6 fw-bold mb-1", item.title),
+        makeText("p", "small text-secondary mb-1", item.artist_or_channel || "가수·채널 미입력"),
+        makeText("p", "small mb-0", item.original_filename
+          ? `${item.original_filename} · ${formatBytes(item.size_bytes)} · ${formatTime(item.duration_seconds || 0)}`
+          : "승인 완료 · 음원 파일 등록 대기"),
+      );
+      const badge = makeText("span", `badge request-status-${item.status === "READY" ? "approved" : "pending"}`, item.status);
+      header.append(details, badge);
+      article.append(header);
+      if (item.rights_note) article.append(makeText("p", "small text-secondary mt-2 mb-0", `권리 확인: ${item.rights_note}`));
+      return article;
+    }));
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function reviewRequest(requestId, decision, rejectReason = null) {
   try {
     await request(`/api/requests/${requestId}/review`, {
@@ -284,6 +324,7 @@ async function reviewRequest(requestId, decision, rejectReason = null) {
       body: JSON.stringify({ decision, reject_reason: rejectReason }),
     });
     await loadReviewList();
+    await loadMediaLibrary();
   } catch (error) {
     showError(error);
   }
@@ -602,6 +643,7 @@ elements.logoutButton.addEventListener("click", async () => {
 });
 
 elements.reviewRefreshButton.addEventListener("click", loadReviewList);
+elements.mediaRefreshButton.addEventListener("click", loadMediaLibrary);
 elements.userRefreshButton.addEventListener("click", loadPendingUsers);
 
 async function refreshPlayer() {
@@ -621,6 +663,7 @@ elements.playerRefreshButton.addEventListener("click", refreshPlayer);
 refreshPlayer();
 window.setInterval(refreshPlayer, 5000);
 loadReviewList();
+loadMediaLibrary();
 loadPendingUsers();
 loadPlaylistBuilder();
 loadSchedules();

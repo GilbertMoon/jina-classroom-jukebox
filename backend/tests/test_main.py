@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 from httpx import ASGITransport, AsyncClient
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -900,6 +900,19 @@ def test_media_upload_requires_approval_rights_and_valid_audio(monkeypatch) -> N
     assert too_large.status_code == 413
     assert invalid_audio.status_code == 422
 
+    with app.state.testing_session() as session:
+        track = session.scalar(select(Track).where(Track.title == "Test Song"))
+        assert track is not None
+        assert track.media_status == MediaStatus.PENDING_ACQUISITION
+        assert track.media_path is None
+        assert track.sha256 is None
+    assert list(Path(media_api.get_media_root()).iterdir()) == []
+
+
+def test_uploaded_media_is_not_exposed_as_a_public_static_file() -> None:
+    response = run(get("/media/private-song.mp3"))
+    assert response.status_code == 404
+
 
 def test_media_upload_requires_admin_and_csrf() -> None:
     async def scenario():
@@ -933,6 +946,142 @@ def test_media_upload_requires_admin_and_csrf() -> None:
     student_upload, no_csrf = run(scenario())
     assert student_upload.status_code == 403
     assert no_csrf.status_code == 403
+
+
+def test_admin_media_library_lists_waiting_and_ready_tracks(monkeypatch) -> None:
+    monkeypatch.setattr(
+        media_api.manual_upload_provider,
+        "inspect",
+        lambda path, extension: MediaInspection(duration_seconds=95),
+    )
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            waiting = await create_student_request(student, student_csrf, "dQw4w9WgXcQ", "Waiting")
+            ready = await create_student_request(student, student_csrf, "9bZkp7q19f0", "Ready")
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            await approve_request(admin, admin_csrf, waiting["id"])
+            approved = await approve_request(admin, admin_csrf, ready["id"])
+            await admin.post(
+                "/api/media/upload",
+                headers={"X-CSRF-Token": admin_csrf},
+                data={
+                    "track_id": approved["track_id"],
+                    "rights_confirmed": "true",
+                    "rights_note": "직접 제작",
+                },
+                files={"file": ("ready.mp3", b"audio", "audio/mpeg")},
+            )
+            return await admin.get("/api/media")
+
+    response = run(scenario())
+    assert response.status_code == 200
+    items = {item["title"]: item for item in response.json()}
+    assert items["Waiting"]["status"] == "PENDING_ACQUISITION"
+    assert items["Waiting"]["original_filename"] is None
+    assert items["Ready"]["status"] == "READY"
+    assert items["Ready"]["original_filename"] == "ready.mp3"
+    assert items["Ready"]["size_bytes"] == 5
+    assert items["Ready"]["rights_note"] == "직접 제작"
+
+
+def test_media_library_requires_admin() -> None:
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            await login(student, "student@example.com", "student-password")
+            return await student.get("/api/media")
+
+    assert run(scenario()).status_code == 403
+
+
+def test_duplicate_media_file_is_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(
+        media_api.manual_upload_provider,
+        "inspect",
+        lambda path, extension: MediaInspection(duration_seconds=30),
+    )
+
+    async def scenario():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as student:
+            student_csrf = await login(student, "student@example.com", "student-password")
+            first = await create_student_request(student, student_csrf, "dQw4w9WgXcQ", "First")
+            second = await create_student_request(student, student_csrf, "9bZkp7q19f0", "Second")
+        async with AsyncClient(transport=transport, base_url="http://test") as admin:
+            admin_csrf = await login(admin, "admin@example.com", "admin-password")
+            first = await approve_request(admin, admin_csrf, first["id"])
+            second = await approve_request(admin, admin_csrf, second["id"])
+            for track_id in (first["track_id"], second["track_id"]):
+                response = await admin.post(
+                    "/api/media/upload",
+                    headers={"X-CSRF-Token": admin_csrf},
+                    data={
+                        "track_id": track_id,
+                        "rights_confirmed": "true",
+                        "rights_note": "사용 허가 확인",
+                    },
+                    files={"file": ("same.mp3", b"same-audio", "audio/mpeg")},
+                )
+            return response
+
+    response = run(scenario())
+    assert response.status_code == 409
+    assert response.json()["detail"] == "같은 음원 파일이 다른 곡에 이미 등록되어 있습니다."
+
+
+def test_concurrent_duplicate_commit_conflict_cleans_file(monkeypatch) -> None:
+    monkeypatch.setattr(
+        media_api.manual_upload_provider,
+        "inspect",
+        lambda path, extension: MediaInspection(duration_seconds=30),
+    )
+    collision = {"enabled": False}
+
+    def raise_concurrent_unique_conflict(session) -> None:
+        if collision["enabled"]:
+            collision["enabled"] = False
+            raise IntegrityError("concurrent sha256 insert", {}, Exception("duplicate"))
+
+    session_class = app.state.testing_session.class_
+    event.listen(session_class, "before_commit", raise_concurrent_unique_conflict)
+    try:
+        async def scenario():
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as student:
+                student_csrf = await login(student, "student@example.com", "student-password")
+                created = await create_student_request(student, student_csrf)
+            async with AsyncClient(transport=transport, base_url="http://test") as admin:
+                admin_csrf = await login(admin, "admin@example.com", "admin-password")
+                approved = await approve_request(admin, admin_csrf, created["id"])
+                collision["enabled"] = True
+                response = await admin.post(
+                    "/api/media/upload",
+                    headers={"X-CSRF-Token": admin_csrf},
+                    data={
+                        "track_id": approved["track_id"],
+                        "rights_confirmed": "true",
+                        "rights_note": "사용 허가 확인",
+                    },
+                    files={"file": ("race.mp3", b"same-audio", "audio/mpeg")},
+                )
+                return approved["track_id"], response
+
+        track_id, response = run(scenario())
+    finally:
+        event.remove(session_class, "before_commit", raise_concurrent_unique_conflict)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "동시에 등록된 동일 음원이 있어 저장하지 않았습니다."
+    with app.state.testing_session() as session:
+        track = session.get(Track, UUID(track_id))
+        assert track.media_status == MediaStatus.PENDING_ACQUISITION
+        assert track.media_path is None
+        assert track.sha256 is None
+    assert list(Path(media_api.get_media_root()).iterdir()) == []
 
 
 def add_track(title: str, media_status: MediaStatus) -> UUID:
