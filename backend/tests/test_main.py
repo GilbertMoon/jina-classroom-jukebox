@@ -900,6 +900,19 @@ def test_media_upload_requires_approval_rights_and_valid_audio(monkeypatch) -> N
     assert too_large.status_code == 413
     assert invalid_audio.status_code == 422
 
+    with app.state.testing_session() as session:
+        track = session.scalar(select(Track).where(Track.title == "Test Song"))
+        assert track is not None
+        assert track.media_status == MediaStatus.PENDING_ACQUISITION
+        assert track.media_path is None
+        assert track.sha256 is None
+    assert list(Path(media_api.get_media_root()).iterdir()) == []
+
+
+def test_uploaded_media_is_not_exposed_as_a_public_static_file() -> None:
+    response = run(get("/media/private-song.mp3"))
+    assert response.status_code == 404
+
 
 def test_media_upload_requires_admin_and_csrf() -> None:
     async def scenario():

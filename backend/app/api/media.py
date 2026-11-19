@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from backend.app.auth_dependencies import AdminUser, AdminUserWithCsrf, DatabaseSession
 from backend.app.config import get_max_media_size_bytes, get_media_root
@@ -191,6 +191,13 @@ async def upload_authorized_media(
         )
         try:
             db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            final_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="동시에 등록된 동일 음원이 있어 저장하지 않았습니다.",
+            ) from exc
         except SQLAlchemyError:
             db.rollback()
             final_path.unlink(missing_ok=True)
