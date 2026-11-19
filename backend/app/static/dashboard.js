@@ -297,7 +297,7 @@ async function loadMediaLibrary() {
       const article = document.createElement("article");
       article.className = "request-item border rounded-3 p-3";
       const header = document.createElement("div");
-      header.className = "d-flex flex-wrap justify-content-between gap-2";
+      header.className = "d-flex flex-wrap justify-content-between align-items-start gap-2";
       const details = document.createElement("div");
       details.append(
         makeText("h3", "h6 fw-bold mb-1", item.title),

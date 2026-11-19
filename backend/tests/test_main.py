@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 from httpx import ASGITransport, AsyncClient
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -1031,6 +1031,57 @@ def test_duplicate_media_file_is_rejected(monkeypatch) -> None:
     response = run(scenario())
     assert response.status_code == 409
     assert response.json()["detail"] == "같은 음원 파일이 다른 곡에 이미 등록되어 있습니다."
+
+
+def test_concurrent_duplicate_commit_conflict_cleans_file(monkeypatch) -> None:
+    monkeypatch.setattr(
+        media_api.manual_upload_provider,
+        "inspect",
+        lambda path, extension: MediaInspection(duration_seconds=30),
+    )
+    collision = {"enabled": False}
+
+    def raise_concurrent_unique_conflict(session) -> None:
+        if collision["enabled"]:
+            collision["enabled"] = False
+            raise IntegrityError("concurrent sha256 insert", {}, Exception("duplicate"))
+
+    session_class = app.state.testing_session.class_
+    event.listen(session_class, "before_commit", raise_concurrent_unique_conflict)
+    try:
+        async def scenario():
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as student:
+                student_csrf = await login(student, "student@example.com", "student-password")
+                created = await create_student_request(student, student_csrf)
+            async with AsyncClient(transport=transport, base_url="http://test") as admin:
+                admin_csrf = await login(admin, "admin@example.com", "admin-password")
+                approved = await approve_request(admin, admin_csrf, created["id"])
+                collision["enabled"] = True
+                response = await admin.post(
+                    "/api/media/upload",
+                    headers={"X-CSRF-Token": admin_csrf},
+                    data={
+                        "track_id": approved["track_id"],
+                        "rights_confirmed": "true",
+                        "rights_note": "사용 허가 확인",
+                    },
+                    files={"file": ("race.mp3", b"same-audio", "audio/mpeg")},
+                )
+                return approved["track_id"], response
+
+        track_id, response = run(scenario())
+    finally:
+        event.remove(session_class, "before_commit", raise_concurrent_unique_conflict)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "동시에 등록된 동일 음원이 있어 저장하지 않았습니다."
+    with app.state.testing_session() as session:
+        track = session.get(Track, UUID(track_id))
+        assert track.media_status == MediaStatus.PENDING_ACQUISITION
+        assert track.media_path is None
+        assert track.sha256 is None
+    assert list(Path(media_api.get_media_root()).iterdir()) == []
 
 
 def add_track(title: str, media_status: MediaStatus) -> UUID:
